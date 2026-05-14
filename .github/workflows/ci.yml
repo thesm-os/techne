@@ -34,4 +34,4 @@ jobs:
           cache: true
       - run: go install go.thesmos.sh/ergon/cmd/ergon@latest
       - run: ergon bootstrap
-      - run: ergon check vuln
+      - run: ergon lint vuln
