@@ -20,9 +20,21 @@ modules: []
 # bootstrap — `ergon bootstrap`
 bootstrap:
   # Per-repo additions to the built-in tool list (gofumpt, gci,
-  # golangci-lint, govulncheck, go-license, benchstat, gremlins).
-  # Each entry installs via `go install <pkg>@<version>`.
+  # golangci-lint, govulncheck, go-license, benchstat, gremlins,
+  # gobco). Each entry installs via `go install <pkg>@<version>`.
   extra_tools: []
+  # Version overrides applied across both the built-in tools and
+  # `extra_tools`. Keys are the `go install` package path; values
+  # are the `@<version>` suffix. Use to make CI installs
+  # deterministic; leave empty to track `@latest` for every tool
+  # (the local dev default). A pinned entry for an unknown
+  # package is silently ignored.
+  pinned: {}
+  # Example (uncomment + adjust):
+  #   pinned:
+  #     mvdan.cc/gofumpt: v0.6.0
+  #     github.com/daixiang0/gci: v0.13.5
+  #     github.com/golangci/golangci-lint/v2/cmd/golangci-lint: v2.0.0
 
 # license — `ergon license` (apply) and `ergon lint license` (verify)
 license:
@@ -36,6 +48,28 @@ license:
   exclude_files:
     - "*.gen.go"
     - "*.gen_test.go"
+
+# lint — `ergon lint` umbrella
+#
+# The umbrella runs the full static-analysis suite by default:
+# `vet`, `go`, `md`, `license`, `skip-expiry`, `error-prefix`,
+# `vuln`. Anything that examines source without running tests
+# belongs here; test-derived gates (coverage, mutation, branch)
+# live under `checks` and run from `ergon check`.
+#
+# Use `enabled` to restrict the set (allowlist) or `disabled` to
+# subtract from it (denylist); the CLI flags `--only` / `--skip`
+# layer on top per-invocation. An unknown stage name in either
+# field surfaces as a usage error so typos are caught at start
+# time.
+lint:
+  enabled: [] # empty = every stage in scope (the default)
+  disabled: [] # remove individual stages without forking the binary
+  # error-prefix — `ergon lint error-prefix`
+  error_prefix:
+    # Directories (repository-relative) the walker recurses into.
+    # `[.]` covers the entire tree.
+    target_dirs: ["."]
 
 # markdown — markdownlint-cli2 invocation shared by `ergon fmt`
 # (auto-fix mode) and `ergon lint md` (reporting only)
@@ -109,6 +143,17 @@ release:
 #   honoured at file granularity (gremlins has no per-function
 #   exclusion knob).
 checks:
+  # Stage allow/denylist for the `ergon check` umbrella. Stage
+  # names are `mod`, `lint`, `test`, `coverage`, plus the opt-in
+  # `mutation` and `branch` (auto-appended when their thresholds
+  # are declared below). Static-analysis stages (skip-expiry,
+  # error-prefix, vuln) live under `lint` and run via the nested
+  # `lint` stage above. The CLI flags `--only` / `--skip` layer
+  # on top per-invocation; an unknown stage name surfaces as a
+  # usage error.
+  enabled: [] # empty = every stage in scope (the default)
+  disabled: [] # remove individual stages without forking the binary
+
   # Path globs both gates ignore. `reason` is human-facing so
   # reviewers can challenge new excludes on PR.
   excludes: []
@@ -195,12 +240,6 @@ checks:
       workers: 2
       test_cpu: 2
       timeout_coefficient: 30
-
-  # error-prefix — `ergon check error-prefix`
-  error_prefix:
-    # Directories (repository-relative) the walker recurses into.
-    # `[.]` covers the entire tree.
-    target_dirs: ["."]
 
   # commit-msg — `ergon check commit-msg <file>`
   commit_msg:

@@ -6,10 +6,12 @@
 # sync when you add a target.
 
 .PHONY: help bootstrap install fmt license generate build clean \
-        lint lint-md tidy check-tidy \
-        test test-race test-bench test-fuzz test-coverage \
+        lint lint-vet lint-go lint-md lint-license \
+        lint-skip-expiry lint-error-prefix lint-vuln \
+        tidy check-tidy \
+        test test-race test-bench test-fuzz test-coverage test-e2e \
         bench-baseline bench-regression bench-profile \
-        check check-coverage check-uncovered check-mutation check-branch check-vuln \
+        check check-coverage check-uncovered check-mutation check-branch \
         release
 
 ERGON ?= ergon
@@ -34,10 +36,22 @@ build: ## Compile every module's source (sanity check)
 clean: ## Remove build and coverage artefacts
 	$(ERGON) clean
 
-lint: ## Run the full lint suite (vet + golangci-lint + markdown + license)
+lint: ## Run the full lint suite (vet + go + md + license + skip-expiry + error-prefix + vuln; --only / --skip to narrow)
 	$(ERGON) lint
+lint-vet: ## Run `go vet ./...` per module only
+	$(ERGON) lint vet
+lint-go: ## Run golangci-lint per module only
+	$(ERGON) lint go
 lint-md: ## Run markdownlint only
 	$(ERGON) lint md
+lint-license: ## Verify SPDX license headers only (no fix)
+	$(ERGON) lint license
+lint-skip-expiry: ## Scan t.Skip() messages for expired YYYY-MM-DD clauses
+	$(ERGON) lint skip-expiry
+lint-error-prefix: ## Scan errors.New() literals for the package-name prefix convention
+	$(ERGON) lint error-prefix
+lint-vuln: ## Run govulncheck per module
+	$(ERGON) lint vuln
 
 tidy: ## Run `go mod tidy` per module
 	$(ERGON) mod tidy
@@ -54,6 +68,8 @@ test-fuzz: ## Run every Fuzz target for the configured duration
 	$(ERGON) test fuzz
 test-coverage: ## Render per-module coverage profiles to HTML
 	$(ERGON) test coverage
+test-e2e: ## Run the end-to-end tests behind `//go:build e2e` (skipped by default)
+	go test -tags=e2e ./...
 
 bench-baseline: ## Pin the current benchmark numbers to bench/baseline.txt
 	$(ERGON) bench baseline
@@ -65,7 +81,7 @@ bench-profile: ## Collect CPU+mem pprof artefacts (PATTERN=. PACKAGE=./... MODUL
 		$(if $(PACKAGE),--package=$(PACKAGE),) \
 		$(if $(TIME),--time=$(TIME),) $(FLAGS)
 
-check: ## Run the umbrella pre-merge gate (mod, lint, test, coverage, ...)
+check: ## Run the umbrella pre-merge gate (mod, lint, test, coverage, ...; --only / --skip to narrow)
 	$(ERGON) check
 check-coverage: ## Enforce per-layer coverage thresholds
 	$(ERGON) check coverage
@@ -75,8 +91,6 @@ check-mutation: ## Run gremlins mutation testing per layer (slow)
 	$(ERGON) check mutation
 check-branch: ## Run gobco branch-coverage gating per layer (slow)
 	$(ERGON) check branch
-check-vuln: ## Run govulncheck per module
-	$(ERGON) check vuln
 
 release: ## Bump versions and tag (MESSAGE="..." FLAGS=--major)
 	$(ERGON) release $(if $(MESSAGE),-m "$(MESSAGE)",) $(FLAGS)
