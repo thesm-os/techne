@@ -12,8 +12,14 @@ builds:
     dir: .
     main: ./cmd/techne
     binary: techne
+    # CGO is required by pkg/lang/rust (github.com/smacker/go-tree-sitter
+    # bundles the tree-sitter C library). Cross-compilers are provided by
+    # the goreleaser-cross Docker image used in .github/workflows/
+    # release.yml — osxcross for darwin (with the macOS SDK), llvm-mingw
+    # for windows, and the host glibc/musl toolchains for linux. Per-
+    # target CC/CXX overrides below select the right cross compiler.
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
@@ -22,15 +28,42 @@ builds:
     goarch:
       - amd64
       - arm64
+    overrides:
+      - goos: linux
+        goarch: amd64
+        env:
+          - CC=x86_64-linux-gnu-gcc
+          - CXX=x86_64-linux-gnu-g++
+      - goos: linux
+        goarch: arm64
+        env:
+          - CC=aarch64-linux-gnu-gcc
+          - CXX=aarch64-linux-gnu-g++
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CC=o64-clang
+          - CXX=o64-clang++
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CC=oa64-clang
+          - CXX=oa64-clang++
+      - goos: windows
+        goarch: amd64
+        env:
+          - CC=x86_64-w64-mingw32-gcc
+          - CXX=x86_64-w64-mingw32-g++
+      - goos: windows
+        goarch: arm64
+        env:
+          - CC=/llvm-mingw/bin/aarch64-w64-mingw32-gcc
+          - CXX=/llvm-mingw/bin/aarch64-w64-mingw32-g++
     ldflags:
       - -s -w
       - -X go.thesmos.sh/techne/internal/version.buildVersion={{.Version}}
       - -X go.thesmos.sh/techne/internal/version.buildCommit={{.Commit}}
       - -X go.thesmos.sh/techne/internal/version.buildDate={{.CommitDate}}
-    hooks:
-      post:
-        - cmd: sh -c 'case "{{ .Target }}" in linux_*|windows_amd64_*) exec upx --best --lzma "{{ .Path }}" ;; esac'
-          output: true
 
 archives:
   - id: default

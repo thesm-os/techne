@@ -8,6 +8,18 @@ permissions:
   packages: write
   id-token: write # cosign keyless signing reads OIDC tokens
 
+env:
+  # goreleaser-cross ships pinned cross toolchains: osxcross (with the
+  # macOS SDK) for darwin, llvm-mingw for windows, glibc/musl for linux.
+  # The version is bumped manually so the image stays in sync with the
+  # goreleaser version it bundles; the tag must match a published image
+  # at ghcr.io/goreleaser/goreleaser-cross.
+  # Versioning scheme is `vGOVERSION-N` (Go toolchain version, not the
+  # bundled goreleaser version). v1.26.2-3 ships go1.26.2; close enough
+  # to the project's go.mod (go 1.26) — Go is backward compatible
+  # within a minor.
+  GORELEASER_CROSS_VERSION: v1.26.2-3
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -15,15 +27,21 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: sigstore/cosign-installer@v3
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: latest
-          args: release --clean
+      # We run goreleaser inside the goreleaser-cross container rather
+      # than via goreleaser-action so the cross toolchains needed for
+      # CGO builds (tree-sitter in pkg/lang/rust) are available without
+      # per-OS native runners. The container has goreleaser, cosign,
+      # upx, and every cross compiler pre-installed.
+      - name: Run goreleaser inside goreleaser-cross
+        run: |
+          docker run --rm \
+            -v "$PWD":/build -w /build \
+            -e GITHUB_TOKEN \
+            -e HOMEBREW_TAP_TOKEN \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL \
+            -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/goreleaser/goreleaser-cross:${GORELEASER_CROSS_VERSION} \
+            release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Cross-repo PAT with contents:write on thesm-os/homebrew-tap;

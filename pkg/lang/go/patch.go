@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/tools/imports"
@@ -875,33 +874,6 @@ func parseCheckGo(filename string, src []byte) error {
 // false build failure on the post-patch gate.
 func importsProcess(filename string, src []byte) ([]byte, error) {
 	return imports.Process(filename, src, nil)
-}
-
-// acquirePackageLock flocks the package directory itself to prevent
-// concurrent edits to files in the same package. Returns an unlock
-// func that callers must defer.
-//
-// Uses directory flock (LOCK_EX | LOCK_NB) on the package dir rather
-// than a separate .lock file because the kernel automatically releases
-// the lock when the process terminates (including SIGKILL and OOM
-// kill), so there are no zombie lock files to clean up after a
-// broken run. The non-blocking flag means a concurrent edit fails
-// fast with a clear error rather than hanging.
-func acquirePackageLock(pkgDir string) (unlock func(), err error) {
-	f, err := os.Open(pkgDir)
-	if err != nil {
-		return nil, fmt.Errorf("open package dir for lock: %w", err)
-	}
-
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("package %s is locked by another operation — retry after it completes", pkgDir)
-	}
-
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
-	}, nil
 }
 
 // inferHint produces an actionable one-liner suggestion derived from
