@@ -17,7 +17,7 @@ The same operations are also available over a CLI and a TUI, so humans get
 the same guarantees: every edit is type-checked, every commit is build-gated,
 and every failure rolls back atomically.
 
-[![CI](https://github.com/thesmos/techne/actions/workflows/ci.yml/badge.svg)](https://github.com/thesmos/techne/actions/workflows/ci.yml)
+[![CI](https://github.com/thesm-os/techne/actions/workflows/ci.yml/badge.svg)](https://github.com/thesm-os/eidos/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/go.thesmos.sh/techne.svg)](https://pkg.go.dev/go.thesmos.sh/techne)
 [![Go Report Card](https://goreportcard.com/badge/go.thesmos.sh/techne)](https://goreportcard.com/report/go.thesmos.sh/techne)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
