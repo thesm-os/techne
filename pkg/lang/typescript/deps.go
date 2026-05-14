@@ -36,4 +36,5 @@ import (
 var Deps = tool.Stub[lang.DepsInput, lang.DepsOutput](
 	"lang.typescript.deps",
 	"Map symbol dependencies in a TypeScript project. Find implementations, callers, and references with causal context.",
+	tool.WithShortDescription("Map TypeScript symbol dependencies — callers, references, implementations (stub)"),
 )

@@ -59,4 +59,5 @@ var ChangeType = tool.New[lang.ChangeTypeInput, refactor.Output](
 			Detail:            in.Detail,
 		})
 	},
+	tool.WithShortDescription("Replace a Go type definition and migrate every usage site project-wide"),
 )

@@ -8,10 +8,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// shortDescMaxLen caps the auto-derived ShortDescription so terminal
+// listings stay aligned and a tool's CLI Short line never wraps even
+// on narrow consoles.
+const shortDescMaxLen = 80
 
 // Handler is the typed handler signature every tool built via [New]
 // supplies. The In and Out type parameters are the same ones [New]
@@ -45,12 +51,13 @@ type Option func(t *toolData)
 
 // toolData is the internal representation of a built tool.
 type toolData struct {
-	name         string
-	description  string
-	inputSchema  *jsonschema.Schema
-	outputSchema *jsonschema.Schema
-	execute      func(ctx context.Context, rawInput json.RawMessage) (any, error)
-	registerMCP  func(server *mcp.Server)
+	name             string
+	description      string
+	shortDescription string // optional override; empty triggers auto-derive
+	inputSchema      *jsonschema.Schema
+	outputSchema     *jsonschema.Schema
+	execute          func(ctx context.Context, rawInput json.RawMessage) (any, error)
+	registerMCP      func(server *mcp.Server)
 }
 
 // Name returns the registered tool identifier, the dotted routing
@@ -64,6 +71,23 @@ func (t *toolData) Name() string { return t.name }
 // output, or the TUI catalogue. It is set at construction time and
 // is safe to call concurrently.
 func (t *toolData) Description() string { return t.description }
+
+// ShortDescription returns the one-line summary used by the CLI
+// presenter for cobra's Short field. When [WithShortDescription] was
+// supplied the explicit value is returned verbatim; otherwise the
+// first sentence of Description is extracted and truncated to
+// [shortDescMaxLen] runes — a best-effort fallback that keeps every
+// tool listable without per-tool boilerplate.
+//
+// The auto-derive treats `.`, `?`, and `!` as sentence terminators
+// and trims surrounding whitespace; it never returns the empty
+// string when Description is non-empty.
+func (t *toolData) ShortDescription() string {
+	if t.shortDescription != "" {
+		return t.shortDescription
+	}
+	return deriveShortDescription(t.description)
+}
 
 // InputSchema returns the JSON Schema inferred from the In type
 // parameter passed to [New] or [Stub]. The returned pointer is the
@@ -234,6 +258,63 @@ func Stub[In, Out any](name, description string, opts ...Option) Tool {
 		opt(td)
 	}
 	return td
+}
+
+// WithShortDescription supplies a CLI-friendly one-line summary that
+// overrides the framework's auto-derived default. Use it whenever the
+// long Description starts with "PREFER OVER ..." or otherwise compresses
+// poorly into a single sentence — the auto-derive truncates at the first
+// `.`, `?`, or `!` and tools whose first sentence is just a routing hint
+// produce terminal output like "PREFER OVER Edit + Grep workflow for
+// renaming a Go symbol." which reads worse than the explicit short form.
+//
+// Applied as an [Option] at construction time. Empty values are ignored
+// so callers can pass through a configurable string without a branch.
+func WithShortDescription(short string) Option {
+	return func(t *toolData) {
+		if short != "" {
+			t.shortDescription = short
+		}
+	}
+}
+
+// deriveShortDescription returns a CLI-friendly first-sentence summary
+// of description, truncated to [shortDescMaxLen] runes. Treats `.`,
+// `?`, and `!` as sentence terminators and trims surrounding
+// whitespace; returns the truncated description verbatim when no
+// terminator is found in range.
+func deriveShortDescription(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+	// Collapse internal whitespace so multi-line descriptions
+	// produce a single readable line.
+	flat := strings.Join(strings.Fields(description), " ")
+	for i, r := range flat {
+		if r != '.' && r != '?' && r != '!' {
+			continue
+		}
+		// Skip mid-sentence dots like 'lang.go.rename' or '... etc.'.
+		next := i + 1
+		if next < len(flat) && flat[next] != ' ' {
+			continue
+		}
+		candidate := strings.TrimSpace(flat[:i+1])
+		return capShortDescription(candidate)
+	}
+	return capShortDescription(flat)
+}
+
+// capShortDescription truncates s to at most [shortDescMaxLen] runes,
+// appending an ellipsis when the truncation discards real content.
+// Operates on runes so UTF-8 boundaries are respected.
+func capShortDescription(s string) string {
+	runes := []rune(s)
+	if len(runes) <= shortDescMaxLen {
+		return s
+	}
+	return string(runes[:shortDescMaxLen-1]) + "…"
 }
 
 // Enum constrains a string property in the input schema to a fixed

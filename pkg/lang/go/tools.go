@@ -23,7 +23,7 @@ import "go.thesmos.sh/techne/internal/tool"
 // wiring is required; the MCP server, CLI command tree, and TUI
 // command palette all pull from this registration.
 var Tools = []tool.Tool{
-	Explore, Verify, Search, SearchExplore, GoPatch, Fix,
+	Workspace, Explore, Verify, Search, SearchExplore, GoPatch, Fix,
 	Callers, Implementations, References, Invocations,
 	Rename, ChangeSignature, ImplementInterface,
 	ExtractFunction, ExtractInterface, ExtractVariable,

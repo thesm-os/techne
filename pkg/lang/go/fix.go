@@ -33,6 +33,7 @@ var Fix = tool.New[lang.FixInput, lang.FixOutput](
 	"lang.go.fix",
 	"Lint, apply suggested fix patches, and re-verify in one call. Replaces the verify→patch→verify chain — typically saves 2 turns. Patches go through lang.go.patch (build-gated, rollback-on-failure); the agent never sees corrupted source. Use after a refactor or when a quick lint-clean is needed.",
 	fixHandler,
+	tool.WithShortDescription("Lint, apply suggested fix patches, and re-verify in a single call"),
 )
 
 // fixHandler implements the lang.go.fix RPC as the three-phase

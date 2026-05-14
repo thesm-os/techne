@@ -72,6 +72,7 @@ var Explore = tool.New[lang.ExploreInput, lang.ExploreOutput](
 	"Extracts precise Rust AST blocks (fns, structs, traits, impls) using tree-sitter. Use this instead of read_file when analyzing Rust source. Supports docs/skeleton/code verbosity modes for token control.",
 	exploreHandler,
 	tool.Enum("mode", lang.ModeDocs, lang.ModeCode, lang.ModeSkeleton),
+	tool.WithShortDescription("Extract Rust AST symbols (fns, structs, traits, impls) via tree-sitter"),
 )
 
 func exploreHandler(ctx context.Context, input lang.ExploreInput) (lang.ExploreOutput, error) {

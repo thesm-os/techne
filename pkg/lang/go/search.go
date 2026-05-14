@@ -68,6 +68,7 @@ var Search = tool.New[lang.SearchInput, lang.SearchOutput](
 		lang.KindVar,
 		lang.KindAll,
 	),
+	tool.WithShortDescription("Find Go symbols by fuzzy name or doc-intent across the workspace"),
 )
 
 const (

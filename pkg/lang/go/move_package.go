@@ -55,4 +55,5 @@ var MovePackage = tool.New[lang.MovePackageInput, refactor.Output](
 			Detail:        in.Detail,
 		})
 	},
+	tool.WithShortDescription("Relocate a Go package and rewrite every import project-wide"),
 )

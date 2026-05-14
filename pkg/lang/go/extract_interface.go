@@ -56,4 +56,5 @@ var ExtractInterface = tool.New[lang.ExtractInterfaceInput, refactor.Output](
 			Detail:           in.Detail,
 		})
 	},
+	tool.WithShortDescription("Generate a Go interface mirroring a struct's exported method set"),
 )

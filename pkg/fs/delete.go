@@ -71,6 +71,7 @@ var Delete = tool.New[DeleteInput, DeleteOutput](
 	"fs.delete",
 	"Deletes a file or directory. Use recursive=true for directories.",
 	deleteHandler,
+	tool.WithShortDescription("Delete a file or directory (recursive for non-empty dirs)"),
 )
 
 // deleteHandler implements fs.delete. It dispatches to os.RemoveAll

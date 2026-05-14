@@ -34,4 +34,5 @@ import (
 var Explore = tool.Stub[lang.ExploreInput, lang.ExploreOutput](
 	"lang.python.explore",
 	"Explore symbols in a Python package. Returns classes, functions, and decorators, and methods with configurable verbosity.",
+	tool.WithShortDescription("Extract Python classes, functions, and methods at configurable verbosity (stub)"),
 )

@@ -148,6 +148,7 @@ var Find = tool.New[FindInput, FindOutput](
 	"Finds files by glob pattern with size/date filters. For Go symbol locations, prefer lang.go.search.",
 	findHandler,
 	tool.Enum("type", "file", "dir", "any"),
+	tool.WithShortDescription("Find files by glob with size, date, depth, and ignore filters"),
 )
 
 // findHandler implements fs.find. It validates and parses the date

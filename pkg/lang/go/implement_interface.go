@@ -58,4 +58,5 @@ var ImplementInterface = tool.New[lang.ImplementInterfaceInput, refactor.Output]
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Generate Go method stubs on a struct so it satisfies a given interface"),
 )

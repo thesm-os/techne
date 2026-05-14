@@ -70,6 +70,7 @@ var Document = tool.New[lang.DocumentInput, refactor.Output](
 			Detail:        in.Detail,
 		})
 	},
+	tool.WithShortDescription("Add or refresh godoc comments on Go symbols across one or many files"),
 )
 
 // convertSymbolDocs maps the public [lang.SymbolDoc] schema onto the

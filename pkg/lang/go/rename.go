@@ -59,4 +59,5 @@ var Rename = tool.New[lang.RenameInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Rename a Go symbol project-wide, type-checked and atomic"),
 )

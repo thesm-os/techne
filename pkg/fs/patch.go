@@ -367,6 +367,7 @@ var Patch = tool.New[PatchInput, PatchOutput](
 	"fs.patch",
 	"Applies multi-file edits atomically with optional formatting and build verification. Use this instead of individual file writes when modifying code. All changes are rolled back if any edit fails or verification fails.",
 	patchHandler,
+	tool.WithShortDescription("Apply atomic multi-file edits with optional format and verify-and-rollback"),
 )
 
 // patchHandler implements fs.patch. It executes the snapshot /

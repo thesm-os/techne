@@ -30,4 +30,5 @@ import (
 var Deps = tool.Stub[lang.DepsInput, lang.DepsOutput](
 	"lang.rust.deps",
 	"Map symbol dependencies in a Rust project. Find implementations, callers, and references with causal context.",
+	tool.WithShortDescription("Map Rust symbol dependencies — trait impls, callers, references (stub)"),
 )

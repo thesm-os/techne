@@ -45,6 +45,7 @@ var Verify = tool.New[lang.VerifyInput, lang.VerifyOutput](
 	"PREFER OVER Bash chains of `go test`/`go vet`/`go build`/`golangci-lint`. One call runs the requested suites and returns structured per-suite reports (status, issues, metrics) plus pre-filled SuggestedPatches that feed directly into lang.go.patch — chaining a lint→fix→re-verify workflow drops from 5 turns to 2. Workspace-aware (handles go.work). Pass compare_to=<git ref> to narrow targets to packages affected by the diff.",
 	verifyHandler,
 	tool.Enum("suites", lang.SuiteLint, lang.SuiteTest, lang.SuiteBench, lang.SuiteFuzz),
+	tool.WithShortDescription("Run Go lint/test/bench/fuzz suites with structured per-suite reports"),
 )
 
 // defaultVerifyTargets returns the package patterns to use when the

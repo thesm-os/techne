@@ -74,6 +74,7 @@ var Move = tool.New[MoveInput, MoveOutput](
 	"fs.move",
 	"Moves or renames a file or directory.",
 	moveHandler,
+	tool.WithShortDescription("Move or rename a file or directory via a single rename syscall"),
 )
 
 // moveHandler implements fs.move. When Force is set it first removes

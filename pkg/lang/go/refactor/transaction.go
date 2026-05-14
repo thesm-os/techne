@@ -147,7 +147,17 @@ func (ws *WorkspaceTransaction) LoadPackages(ctx context.Context) ([]*packages.P
 	mode := packages.NeedSyntax | packages.NeedName | packages.NeedFiles |
 		packages.NeedCompiledGoFiles | packages.NeedTypes | packages.NeedTypesInfo |
 		packages.NeedImports | packages.NeedDeps
-	return w.Load(ctx, mode, nil, workspace.WithTests())
+	pkgs, err := w.Load(ctx, mode, nil, workspace.WithTests())
+	if err != nil {
+		return nil, err
+	}
+	// Surface build-tag coverage gaps: any .go files excluded by the host's
+	// active build tags are listed as advisory notes so the caller knows the
+	// refactor only covered the current-tag set. See [detectExcludedFiles].
+	for _, note := range detectExcludedFiles(pkgs) {
+		ws.AddNote(note)
+	}
+	return pkgs, nil
 }
 
 // AddChange stages a file edit, taking responsibility for snapshotting the

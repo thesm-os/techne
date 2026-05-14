@@ -50,4 +50,5 @@ var InlineConstant = tool.New[lang.InlineConstantInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Replace every use of a Go constant with its literal value and delete the declaration"),
 )

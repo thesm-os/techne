@@ -474,3 +474,119 @@ func execute(t *testing.T, input lang.ExploreInput) lang.ExploreOutput {
 	}
 	return out
 }
+
+// TestExploreReadSideImprovements covers the four read-side cleanups
+// added to lang.go.explore: noise filters (cache hashes, stdlib
+// internals), the production_only flag, the overview mode, and the
+// improved path-resolution error message.
+func TestExploreReadSideImprovements(t *testing.T) {
+	t.Run("imports_strip_testing_internal_testdeps", func(t *testing.T) {
+		dir := writeMod(t, "implfilter", map[string]string{
+			"a.go": "package implfilter\n\nfunc Foo() {}\n",
+			"a_test.go": "package implfilter\n\nimport \"testing\"\n\n" +
+				"func TestFoo(t *testing.T) { _ = t; Foo() }\n",
+		})
+		t.Chdir(dir)
+		out := execute(t, lang.ExploreInput{Package: "."})
+		for _, imp := range out.Imports {
+			if strings.HasPrefix(imp, "testing/internal/") {
+				t.Errorf("imports should not contain stdlib-internal helper, got %q", imp)
+			}
+		}
+	})
+
+	t.Run("production_only_skips_test_files_and_symbols", func(t *testing.T) {
+		dir := writeMod(t, "prodonly", map[string]string{
+			"prod.go": "package prodonly\n\nfunc Service() string { return \"ok\" }\n",
+			"prod_test.go": "package prodonly\n\nimport \"testing\"\n\n" +
+				"func TestService(t *testing.T) { _ = Service() }\n" +
+				"func BenchmarkService(b *testing.B) { _ = Service() }\n",
+		})
+		t.Chdir(dir)
+
+		full := execute(t, lang.ExploreInput{Package: "."})
+		if _, ok := full.Symbols["TestService"]; !ok {
+			t.Errorf("default explore should include TestService; got %v", full.SymbolOrder)
+		}
+
+		prod := execute(t, lang.ExploreInput{Package: ".", ProductionOnly: true})
+		if _, ok := prod.Symbols["TestService"]; ok {
+			t.Errorf("ProductionOnly should exclude TestService; got %v", prod.SymbolOrder)
+		}
+		if _, ok := prod.Symbols["BenchmarkService"]; ok {
+			t.Errorf("ProductionOnly should exclude BenchmarkService; got %v", prod.SymbolOrder)
+		}
+		if _, ok := prod.Symbols["Service"]; !ok {
+			t.Errorf("ProductionOnly should keep production symbol Service; got %v", prod.SymbolOrder)
+		}
+		for _, f := range prod.Files {
+			if strings.HasSuffix(f, "_test.go") {
+				t.Errorf("ProductionOnly should drop *_test.go files; got %q", f)
+			}
+		}
+	})
+
+	t.Run("overview_mode_returns_one_line_summary_only", func(t *testing.T) {
+		dir := writeMod(t, "overview", map[string]string{
+			"a.go": "// Package overview is a test fixture.\npackage overview\n\n" +
+				"// Greet returns a greeting for name.\nfunc Greet(name string) string { return name }\n\n" +
+				"// User holds user data.\ntype User struct { Name string }\n",
+		})
+		t.Chdir(dir)
+		out := execute(t, lang.ExploreInput{Package: ".", Mode: lang.ModeOverview})
+
+		greet, ok := out.Symbols["Greet"]
+		if !ok {
+			t.Fatalf("expected Greet in overview output; got %v", out.SymbolOrder)
+		}
+		// Overview mode must strip rich fields and populate OneLineSummary.
+		if greet.OneLineSummary == "" {
+			t.Errorf("expected OneLineSummary populated in overview mode")
+		}
+		if greet.Signature != "" || greet.Implementation != "" ||
+			greet.Docblock != "" || greet.Location != "" {
+			t.Errorf("overview mode should drop Signature/Implementation/Docblock/Location; got %+v", greet)
+		}
+		if !strings.Contains(greet.OneLineSummary, "Greet") {
+			t.Errorf("OneLineSummary should include symbol name; got %q", greet.OneLineSummary)
+		}
+		if !strings.Contains(greet.OneLineSummary, "greeting") {
+			t.Errorf("OneLineSummary should include doc sentence; got %q", greet.OneLineSummary)
+		}
+	})
+
+	t.Run("path_error_suggests_qualified_form", func(t *testing.T) {
+		dir := writeMod(t, "patherr", map[string]string{
+			"a.go": "package patherr\n\nfunc Foo() {}\n",
+		})
+		t.Chdir(dir)
+		_, err := executeExploreRaw(t, lang.ExploreInput{Package: "cmd/missing"})
+		if err == nil {
+			t.Fatal("expected error for unqualified non-existent path")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "patherr/cmd/missing") {
+			t.Errorf("error should suggest qualified path 'patherr/cmd/missing'; got: %v", err)
+		}
+	})
+}
+
+func executeExploreRaw(t *testing.T, in lang.ExploreInput) (lang.ExploreOutput, error) {
+	t.Helper()
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	result, err := golang.Explore.Execute(t.Context(), raw)
+	if err != nil {
+		return lang.ExploreOutput{}, err
+	}
+	out, ok := result.(lang.ExploreOutput)
+	if !ok {
+		b, _ := json.Marshal(result)
+		if err2 := json.Unmarshal(b, &out); err2 != nil {
+			t.Fatalf("unexpected result type %T: %v", result, err2)
+		}
+	}
+	return out, nil
+}

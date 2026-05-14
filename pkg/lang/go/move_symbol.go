@@ -56,4 +56,5 @@ var MoveSymbol = tool.New[lang.MoveSymbolInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Move a Go symbol (with receiver methods) between files in the same package"),
 )

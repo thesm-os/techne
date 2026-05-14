@@ -59,4 +59,5 @@ var MoveFile = tool.New[lang.MoveFileInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Move a Go source file to another package, rewriting imports atomically"),
 )

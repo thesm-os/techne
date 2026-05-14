@@ -137,8 +137,13 @@ func Register(root *cobra.Command, tools []tool.Tool, groups []tool.Group) {
 		}
 
 		leaf := &cobra.Command{
-			Use:   leafName,
-			Short: t.Description(),
+			Use: leafName,
+			// CLI uses the short form so `--help` listings stay aligned
+			// at typical terminal widths. The full LLM-optimized
+			// Description (with "PREFER OVER ..." routing hints) is
+			// surfaced in Long below.
+			Short: t.ShortDescription(),
+			Long:  t.Description(),
 		}
 
 		schema := t.InputSchema()

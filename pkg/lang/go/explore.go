@@ -11,7 +11,9 @@ import (
 	"go/format"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -20,6 +22,12 @@ import (
 	"go.thesmos.sh/techne/internal/tool"
 	"go.thesmos.sh/techne/pkg/lang"
 )
+
+// cacheHashFilesRegex matches build-cache artifact filenames that
+// occasionally leak into packages.Load output for tests and cgo: 40+
+// hex chars optionally followed by "-d" / "-cgoN" / similar. These
+// are never agent-relevant and are filtered out of [ExploreOutput.Files].
+var cacheHashFilesRegex = regexp.MustCompile(`^[a-f0-9]{40,}(-[a-z0-9]+)?$`)
 
 // Explore is the lang.go.explore tool. It extracts Go declarations
 // (functions, methods, structs, interfaces, types, consts, vars) from a
@@ -60,9 +68,10 @@ import (
 // an additional ~500 tokens per turn.
 var Explore = tool.New[lang.ExploreInput, lang.ExploreOutput](
 	"lang.go.explore",
-	"PREFER OVER Read for any Go-symbol exploration. Returns just the declarations you ask for (one function, a struct's API surface, etc.) instead of the whole file — saves ~80% of tokens. Three modes balance token cost vs detail: 'docs' (~50 tokens/symbol), 'skeleton' (signatures+fields, ~150 tokens/symbol, default), 'code' (full source, ~500+ tokens/symbol). Read remains right for non-Go files and for end-to-end reading of small files. AGENT HINT: Pass specific symbol names in 'symbols' to extract only what you need.",
+	"PREFER OVER Read for any Go-symbol exploration. Returns just the declarations you ask for (one function, a struct's API surface, etc.) instead of the whole file — saves ~80% of tokens. Four modes balance token cost vs detail: 'overview' (one-line summary per symbol, ~500 tokens total — ideal first scan), 'docs' (~50 tokens/symbol), 'skeleton' (signatures+fields, ~150 tokens/symbol, default), 'code' (full source, ~500+ tokens/symbol). Read remains right for non-Go files and for end-to-end reading of small files. AGENT HINT: Pass specific symbol names in 'symbols' to extract only what you need; set production_only=true to skip test files and Test/Benchmark/Fuzz/Example symbols.",
 	exploreHandler,
-	tool.Enum("mode", lang.ModeDocs, lang.ModeCode, lang.ModeSkeleton),
+	tool.Enum("mode", lang.ModeOverview, lang.ModeDocs, lang.ModeCode, lang.ModeSkeleton),
+	tool.WithShortDescription("Extract Go declarations from a package at four configurable verbosity modes"),
 )
 
 // exploreHandler implements the lang.go.explore RPC. Loads the requested
@@ -111,10 +120,18 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 
 	pkgs, err := packages.Load(cfg, pattern)
 	if err != nil {
-		return lang.ExploreOutput{}, fmt.Errorf("load package %q: %w", input.Package, err)
+		return lang.ExploreOutput{}, fmt.Errorf(
+			"load package %q: %s",
+			input.Package,
+			suggestQualifiedPath(input.Package, err.Error()),
+		)
 	}
 	if len(pkgs) == 0 {
-		return lang.ExploreOutput{}, fmt.Errorf("no packages found for %q", input.Package)
+		return lang.ExploreOutput{}, fmt.Errorf(
+			"no packages found for %q. %s",
+			input.Package,
+			suggestQualifiedPath(input.Package, ""),
+		)
 	}
 
 	// Collect any loader errors.
@@ -125,10 +142,11 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 		}
 	}
 	if len(loaderErrs) > 0 {
+		joined := strings.Join(loaderErrs, "; ")
 		return lang.ExploreOutput{}, fmt.Errorf(
 			"package load errors for %q: %s",
 			input.Package,
-			strings.Join(loaderErrs, "; "),
+			suggestQualifiedPath(input.Package, joined),
 		)
 	}
 
@@ -143,6 +161,16 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 			// Default to skeleton to avoid dumping 50+ implementations.
 			mode = lang.ModeSkeleton
 		}
+	}
+
+	// extractionMode controls what the AST extractors materialize.
+	// Overview mode reduces output afterwards but still needs the
+	// skeleton-level signature so the one-line summary can read
+	// `Full() string — Full returns ...` instead of just `Full — Full
+	// returns ...`.
+	extractionMode := mode
+	if extractionMode == lang.ModeOverview {
+		extractionMode = lang.ModeSkeleton
 	}
 
 	// Build a filter set for requested symbols.
@@ -196,6 +224,16 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 			pkgImportPath = pkgImportPath[:idx]
 		}
 
+		// ProductionOnly: skip synthetic test variants and *_test packages.
+		if input.ProductionOnly {
+			if strings.Contains(pkg.PkgPath, " [") || strings.HasSuffix(pkg.PkgPath, ".test") {
+				continue
+			}
+			if strings.HasSuffix(pkg.Name, "_test") {
+				continue
+			}
+		}
+
 		// Build a sorted list of syntax files paired with their paths.
 		// pkg.CompiledGoFiles gives file paths in order; pkg.Syntax has the ASTs.
 		// They correspond 1:1.
@@ -219,8 +257,12 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 		})
 
 		// Collect all imports — will be pruned later if specific symbols are requested.
+		// Skip stdlib-internal helpers (testing/internal/* etc.) and vendored
+		// paths; they're never agent-relevant and just inflate the response.
 		for importPath := range pkg.Imports {
-			importSet[importPath] = true
+			if isAgentRelevantImport(importPath) {
+				importSet[importPath] = true
+			}
 		}
 
 		// Build per-file import alias map for import pruning.
@@ -239,7 +281,14 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 			fname := entry.path
 			file := entry.file
 
-			fileSet[filepath.Base(fname)] = true
+			// ProductionOnly: skip test files entirely.
+			if input.ProductionOnly && strings.HasSuffix(fname, "_test.go") {
+				continue
+			}
+
+			if base := filepath.Base(fname); isAgentRelevantFile(base, fname) {
+				fileSet[base] = true
+			}
 
 			if out.PackageDoc == "" && file.Doc != nil {
 				out.PackageDoc = strings.TrimSpace(file.Doc.Text())
@@ -250,7 +299,7 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 			for _, decl := range file.Decls {
 				switch d := decl.(type) {
 				case *ast.FuncDecl:
-					symbols := extractFunc(fset, d, src, mode, input.IncludePrivate, pkgImportPath)
+					symbols := extractFunc(fset, d, src, extractionMode, input.IncludePrivate, pkgImportPath)
 					for _, sym := range symbols {
 						name := sym.Key
 						if len(wantSymbol) > 0 && !wantSymbol[name] {
@@ -265,7 +314,7 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 					}
 
 				case *ast.GenDecl:
-					symbols := extractGenDecl(fset, d, src, mode, input.IncludePrivate)
+					symbols := extractGenDecl(fset, d, src, extractionMode, input.IncludePrivate)
 					for _, sym := range symbols {
 						name := sym.Key
 						if len(wantSymbol) > 0 && !wantSymbol[name] {
@@ -297,6 +346,10 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 			return false
 		}
 		if input.NameSuffix != "" && !strings.HasSuffix(base, input.NameSuffix) {
+			return false
+		}
+		// ProductionOnly: drop Test/Benchmark/Fuzz/Example top-level functions.
+		if input.ProductionOnly && isTestEntryName(base) {
 			return false
 		}
 		return true
@@ -357,6 +410,21 @@ func exploreHandler(_ context.Context, input lang.ExploreInput) (lang.ExploreOut
 					sym.Implementation = minifyGoSource(sym.Implementation)
 				}
 				out.Symbols[name] = sym
+			}
+		}
+	}
+
+	// Overview mode: reduce each symbol to OneLineSummary and clear
+	// every other field. The agent gets a ~500-token scan of the
+	// package's API surface, then makes a targeted code-mode call for
+	// the symbols it actually wants to read.
+	if mode == lang.ModeOverview {
+		for _, name := range out.SymbolOrder {
+			sym := out.Symbols[name]
+			summary := buildOneLineSummary(name, sym)
+			out.Symbols[name] = lang.SymbolMetadata{
+				Kind:           sym.Kind,
+				OneLineSummary: summary,
 			}
 		}
 	}
@@ -744,4 +812,171 @@ func pruneImports(symbols map[string]lang.SymbolMetadata, aliases map[string]str
 // in SymbolMetadata.Methods.
 func receiverBase(recv string) string {
 	return strings.TrimLeft(recv, "*")
+}
+
+// isAgentRelevantFile reports whether base looks like a real Go source
+// file path worth surfacing in [ExploreOutput.Files]. Filters out the
+// build-cache artefacts that packages.Load occasionally surfaces for
+// cgo + tests — 40+ hex-character filenames optionally followed by a
+// "-d" / "-cgoN" suffix. The fullPath is also checked against the user's
+// GOCACHE so that anything inside the build cache is excluded
+// regardless of name shape.
+//
+// Returns false for non-Go file extensions; the explore tool's surface
+// is intentionally Go-source-focused (`.go`, `.s` for assembly, `.c` /
+// `.h` for cgo headers that ship in the same package).
+func isAgentRelevantFile(base, fullPath string) bool {
+	if base == "" {
+		return false
+	}
+	if cacheHashFilesRegex.MatchString(base) {
+		return false
+	}
+	// Strip the extension to also catch "<hash>-d.go" patterns the cache
+	// sometimes produces during cgo preprocessing.
+	if dot := strings.LastIndex(base, "."); dot > 0 {
+		stem := base[:dot]
+		if cacheHashFilesRegex.MatchString(stem) {
+			return false
+		}
+	}
+	// Reject anything under the Go build cache directory.
+	if cache := os.Getenv("GOCACHE"); cache != "" && strings.HasPrefix(fullPath, cache+string(filepath.Separator)) {
+		return false
+	}
+	switch ext := strings.ToLower(filepath.Ext(base)); ext {
+	case ".go", ".s", ".c", ".h":
+		return true
+	default:
+		return false
+	}
+}
+
+// isTestEntryName reports whether name is a Go test entry point —
+// Test*, Benchmark*, Fuzz*, or Example* — distinguished from regular
+// identifiers that happen to share a prefix. Go's testing convention
+// requires that the next character after the prefix is an uppercase
+// letter or underscore; "Testify" is not a test, but "Test_Parse" and
+// "TestParseArgs" are.
+//
+// Used by the ProductionOnly filter to suppress test-entry symbols
+// from explore output without false-positive matches on production
+// identifiers whose names happen to begin with one of the keywords.
+func isTestEntryName(name string) bool {
+	for _, prefix := range []string{"Test", "Benchmark", "Fuzz", "Example"} {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		rest := name[len(prefix):]
+		if rest == "" {
+			// "Test", "Benchmark", "Fuzz", "Example" by themselves are
+			// not test entry points — those would just be regular
+			// exported identifiers named after the keyword.
+			return false
+		}
+		c := rest[0]
+		if c == '_' || (c >= 'A' && c <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
+// buildOneLineSummary renders a single-line description of a symbol
+// for overview-mode output and the workspace tool's `detail=full`
+// rendering. The format is `name(args) returns — first sentence of doc`
+// for functions, `Type kind — first sentence` for types/consts/vars,
+// capped at ~120 characters so the line fits in a typical terminal
+// without wrapping.
+//
+// The implementation falls back gracefully when fields are empty:
+// missing docs are simply omitted (no trailing dash), missing
+// signatures degrade to a bare name. Method receivers are surfaced
+// via the meta.Receiver field when present so `(*Engine).Run` reads
+// naturally rather than as the raw `Engine.Run` map key.
+func buildOneLineSummary(name string, meta lang.SymbolMetadata) string {
+	var b strings.Builder
+	switch meta.Kind {
+	case lang.KindFunc, lang.KindMethod:
+		// Prefer the AST signature when available; otherwise fall back
+		// to the bare name.
+		if meta.Signature != "" {
+			b.WriteString(strings.TrimPrefix(meta.Signature, "func "))
+		} else {
+			b.WriteString(name)
+		}
+	case lang.KindStruct, lang.KindInterface, lang.KindType:
+		fmt.Fprintf(&b, "%s %s", name, meta.Kind)
+	default:
+		// Const, var, anything else — just the name.
+		b.WriteString(name)
+	}
+	if doc := firstSentence(meta.Docblock); doc != "" {
+		b.WriteString(" — ")
+		b.WriteString(doc)
+	}
+	return capLine(b.String())
+}
+
+// isAgentRelevantImport reports whether an import path is worth
+// surfacing in [ExploreOutput.Imports]. Stdlib-internal helpers and
+// vendored paths are filtered out because they're noise to an agent
+// browsing a package — `testing/internal/testdeps` shows up in every
+// test-bearing package's imports, never useful, always 30+ tokens.
+func isAgentRelevantImport(importPath string) bool {
+	if importPath == "" {
+		return false
+	}
+	if strings.HasPrefix(importPath, "testing/internal/") {
+		return false
+	}
+	if strings.Contains(importPath, "/vendor/") {
+		return false
+	}
+	return true
+}
+
+// suggestQualifiedPath enriches a packages.Load failure message when
+// the input looks like a relative path that should have been the
+// fully-qualified module form. Common agent mistake: passing
+// "cmd/foo" when the package is actually "go.example.com/proj/cmd/foo".
+//
+// When the input doesn't carry a domain-shaped first segment (no dot
+// before the first slash) AND a go.mod can be located in the working
+// tree, the returned message includes a suggestion of the qualified
+// path so the agent can correct itself in one turn rather than five.
+// Falls back to the original error verbatim when no go.mod is reachable.
+func suggestQualifiedPath(input, original string) string {
+	// Already absolute / dot-relative / qualified — nothing to suggest.
+	if input == "" ||
+		strings.HasPrefix(input, "./") ||
+		strings.HasPrefix(input, "../") ||
+		strings.HasPrefix(input, "/") ||
+		strings.Contains(input, "...") {
+		return original
+	}
+	// A domain-shaped first segment indicates the user already qualified.
+	if first := strings.SplitN(input, "/", 2)[0]; strings.Contains(first, ".") {
+		return original
+	}
+	// Discover the module path via `go list -m` in the current directory.
+	cmd := exec.Command("go", "list", "-m")
+	out, err := cmd.Output()
+	if err != nil {
+		return original
+	}
+	modPath := strings.TrimSpace(string(out))
+	if modPath == "" || modPath == "command-line-arguments" {
+		return original
+	}
+	qualified := modPath + "/" + input
+	hint := fmt.Sprintf(
+		"did you mean %q? (module path detected from go.mod: %q). Pass a fully qualified import path, or a filesystem path starting with `.` / `./` / `../`",
+		qualified,
+		modPath,
+	)
+	if original == "" {
+		return hint
+	}
+	return original + " — " + hint
 }

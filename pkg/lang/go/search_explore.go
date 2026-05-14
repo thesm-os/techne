@@ -38,6 +38,7 @@ var SearchExplore = tool.New[lang.SearchExploreInput, lang.SearchExploreOutput](
 	"lang.go.search_explore",
 	"PREFER OVER calling lang.go.search then lang.go.explore in sequence. Searches for a Go symbol and explores the top match in one call — typically saves 1 turn vs. the two-step chain. Returns the full ranked search list so the agent can pick a different match if the top one wasn't what it wanted.",
 	searchExploreHandler,
+	tool.WithShortDescription("Search for a Go symbol and return the top match's source in one call"),
 )
 
 // searchExploreHandler implements the lang.go.search_explore RPC.

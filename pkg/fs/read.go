@@ -107,6 +107,7 @@ var Read = tool.New[ReadInput, ReadOutput](
 	"fs.read",
 	"Reads file contents with line-level precision. Use offset+limit to read specific sections instead of loading entire files. Prefer lang.go.explore for Go source — it returns structured symbols instead of raw text.",
 	readHandler,
+	tool.WithShortDescription("Read a window of lines from a file with offset, limit, and total line count"),
 )
 
 // readHandler implements fs.read. It opens the file, scans every line

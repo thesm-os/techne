@@ -60,6 +60,7 @@ var AddTests = tool.New[lang.AddTestsInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Scaffold Go test functions and subtests with parallel-safe boilerplate"),
 )
 
 // convertTestSpecs maps the public [lang.TestSpec] schema onto the

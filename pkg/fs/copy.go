@@ -85,6 +85,7 @@ var Copy = tool.New[CopyInput, CopyOutput](
 	"fs.copy",
 	"Copies a file or directory.",
 	copyHandler,
+	tool.WithShortDescription("Copy a file or directory tree, preserving file modes"),
 )
 
 // copyHandler implements fs.copy. It stats the source to decide

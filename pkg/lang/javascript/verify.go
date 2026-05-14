@@ -37,4 +37,5 @@ import (
 var Verify = tool.Stub[lang.VerifyInput, lang.VerifyOutput](
 	"lang.javascript.verify",
 	"Run quality gates on a JavaScript project. Supports lint, test, bench, and fuzz suites with structured output.",
+	tool.WithShortDescription("Run JavaScript lint/test/bench/fuzz suites with structured reports (stub)"),
 )

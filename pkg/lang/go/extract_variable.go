@@ -55,4 +55,5 @@ var ExtractVariable = tool.New[lang.ExtractVariableInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Extract a Go expression into a local variable with inferred type"),
 )

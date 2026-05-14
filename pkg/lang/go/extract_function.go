@@ -63,4 +63,5 @@ var ExtractFunction = tool.New[lang.ExtractFunctionInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Extract a Go statement range into a new function with inferred signature"),
 )

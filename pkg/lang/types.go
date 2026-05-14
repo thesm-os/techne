@@ -46,6 +46,14 @@ const (
 	// (roughly 500+ tokens per symbol). The default when specific symbols
 	// are requested by name.
 	ModeCode = "code" // Full source implementation
+	// ModeOverview is the lightest mode: returns package_doc + symbol
+	// order + a one-line summary per exported symbol. Roughly 500 tokens
+	// for a typical 20-symbol package, an order of magnitude cheaper
+	// than [ModeDocs]. Use as the first call when scanning a package
+	// before deciding which symbols to drill into with skeleton or code
+	// mode — it skips Location, Signature, Docblock, Implementation,
+	// Methods, Fields, Receiver, and ReproCommand entirely.
+	ModeOverview = "overview" // One-line summary per symbol (cheapest)
 )
 
 // Symbol kinds returned by explore and search tools.
@@ -332,6 +340,15 @@ type ExploreInput struct {
 	// will no longer work against the returned source — use only when
 	// reading, not editing.
 	Minify bool `json:"minify,omitempty" jsonschema:"Collapse blank lines and normalize indentation in returned implementations. Combine with strip_comments for maximum token savings."`
+	// ProductionOnly excludes test code from the response: `*_test.go`
+	// files are skipped, packages whose name ends in `_test` are
+	// dropped, the synthetic test-augmented variants from
+	// packages.Load are collapsed into the production package, and
+	// symbols whose name matches Test/Benchmark/Fuzz/Example are
+	// filtered out. Default false (returns everything). Set true when
+	// an agent is scanning a package's production surface and the
+	// interleaved tests would just inflate the payload.
+	ProductionOnly bool `json:"production_only,omitempty" jsonschema:"Exclude *_test.go files, packages named *_test, and Test/Benchmark/Fuzz/Example symbols. Default: false. Set true to get the production-only API surface without test scaffolding noise."`
 }
 
 // ExploreOutput is the structured response from lang.go.explore. It
@@ -452,6 +469,14 @@ type SymbolMetadata struct {
 	// ./pkg/parser/...` — so the agent can reproduce a failure or
 	// verify a fix without composing the command from scratch.
 	ReproCommand string `json:"repro_command,omitempty" jsonschema:"For Test*/Benchmark*/Fuzz* functions: the exact go test command to run this specific test or benchmark. Copy-paste ready."`
+	// OneLineSummary is a single-line description of the symbol —
+	// `name(args) returns(...) — first sentence of doc` for funcs,
+	// `TypeName struct/interface — first sentence` for types, capped
+	// at ~120 characters. Populated only in [ModeOverview] (and by
+	// [WorkspaceOutput] when its Detail is full), kept empty in every
+	// other mode so the field never inflates payloads when richer
+	// fields are already present.
+	OneLineSummary string `json:"one_line_summary,omitempty" jsonschema:"Single-line symbol summary used by overview mode. Format: 'name(args) — first sentence of doc'."`
 }
 
 // FieldInfo describes one struct field as returned by
@@ -1514,4 +1539,175 @@ type DepReference struct {
 	// was true. Use to understand and modify the caller without a
 	// follow-up explore call.
 	SymbolSource string `json:"symbol_source,omitempty" jsonschema:"Full implementation of the caller/implementor when auto_explore is enabled. AGENT HINT: Use this to understand and modify the caller without a follow-up explore call."`
+}
+
+// WorkspaceInput is the request shape for lang.go.workspace — the
+// canonical "first call when encountering a Go project" tool. The
+// handler discovers the enclosing Go boundary (a go.work file in
+// multi-module mode, falling back to the nearest go.mod), enumerates
+// every package under it, and returns a single map keyed by import
+// path with just enough metadata to plan the next drilling step.
+//
+// The contract is deliberately narrow: no symbol filters, no per-symbol
+// implementation extraction, no token budget. The output is a directory
+// of the workspace, not a substitute for [ExploreInput]. Once the agent
+// has chosen a target package from the returned map, the natural
+// follow-up is [ExploreInput] for an API surface scan or
+// [SearchInput] for a name lookup.
+//
+// Detail levels trade verbosity for token cost in a predictable way:
+//   - [DetailSummary] returns only import paths, package names, and
+//     symbol counts — the smallest possible inventory, suitable for
+//     workspaces with many hundreds of packages.
+//   - [DetailStandard] (the default) adds the first paragraph of each
+//     package's godoc comment and the in-source order of exported
+//     symbol names. The right balance for the typical 10–50-package
+//     workspace.
+//   - [DetailFull] additionally renders one summary line per exported
+//     symbol — function signatures with their first doc sentence, type
+//     kinds with their first doc sentence — so the agent can decide
+//     which packages and symbols to explore without a second round
+//     trip. Use it sparingly on large workspaces; the per-symbol cost
+//     is comparable to [ModeDocs] on every package at once.
+type WorkspaceInput struct {
+	// Package is the workspace anchor. Discovery walks UP from this
+	// directory looking for the outermost go.work file (preferred) or
+	// the closest enclosing go.mod (fallback). Empty means the current
+	// working directory — the right default when an agent has just
+	// landed in a project. Filesystem paths are accepted; import paths
+	// are not, because the handler needs a directory to anchor
+	// discovery.
+	Package string `json:"package,omitempty" jsonschema:"Workspace anchor; defaults to current directory. Discovery walks UP from here to find go.work or go.mod."`
+	// IncludePrivate adds unexported (lowercase-leading) top-level
+	// symbol counts to each WorkspacePackage entry via InternalSyms.
+	// Default false — the public API surface is usually what the agent
+	// is mapping, and unexported counts can be misleading on packages
+	// with large internal helpers. Enable when planning a refactor that
+	// will touch package internals.
+	IncludePrivate bool `json:"include_private,omitempty" jsonschema:"Include unexported symbol counts. Default: false."`
+	// IncludeTests adds *_test.go files to the symbol counts and emits
+	// synthetic test-only packages (the [foo/bar.test] variants from
+	// packages.Load). Default false — agents that are mapping a
+	// codebase rarely want test code competing for output budget. Enable
+	// when investigating test coverage or test-package structure.
+	IncludeTests bool `json:"include_tests,omitempty" jsonschema:"Include *_test.go files in counts and synthetic test packages. Default: false."`
+	// Detail controls response verbosity. [DetailSummary] is the
+	// smallest possible inventory (counts only); [DetailStandard] (the
+	// default) adds package_doc and the in-source order of exported
+	// symbol names; [DetailFull] additionally emits one summary line
+	// per exported symbol. See the type-level comment for the trade-offs.
+	Detail string `json:"detail,omitempty" jsonschema:"Output verbosity: 'summary' = packages + counts only, 'standard' (default) = + package_doc + symbol_order, 'full' = + one-line-per-symbol summary."`
+}
+
+// WorkspaceOutput is the response shape for lang.go.workspace. It is
+// structured as a single flat map keyed by import path so the agent
+// can index into it without a directory walk — the workspace
+// equivalent of an LSP-style symbol table for packages rather than
+// declarations.
+//
+// The Modules slice exists so callers can tell, in one read, whether
+// the workspace is single-module or go.work-multi-module without
+// inspecting paths. IsGoWork repeats the same information at boolean
+// granularity for callers that only branch on layout.
+//
+// The Packages map deliberately excludes vendored dependencies
+// (anywhere under a `vendor/` directory) and, by default, synthetic
+// test-only packages — both would dilute the inventory with code the
+// agent did not author. The IncludeTests toggle re-enables the test
+// variants when needed.
+type WorkspaceOutput struct {
+	// Root is the absolute filesystem path of the workspace root. In
+	// go.work mode this is the directory containing go.work; in
+	// single-module mode it is the directory containing go.mod.
+	Root string `json:"root" jsonschema:"Workspace root directory (the dir containing go.work or go.mod)."`
+	// IsGoWork is true when the workspace was discovered from a go.work
+	// file. False for single-module workspaces. Callers that need to
+	// behave differently for the two layouts can branch on this without
+	// parsing paths.
+	IsGoWork bool `json:"is_go_work" jsonschema:"True if the workspace uses a go.work file with multiple modules."`
+	// Modules is one entry per module under the workspace root. In
+	// single-module mode the slice has exactly one entry whose Dir
+	// equals Root; in go.work mode it has one entry per 'use' directive.
+	// Sorted by module path for deterministic iteration.
+	Modules []WorkspaceModule `json:"modules" jsonschema:"One entry per module under the workspace root."`
+	// Packages is keyed by import path. Excludes vendored dependencies
+	// (anywhere under a `vendor/` directory) and, unless IncludeTests
+	// is set on the request, the synthetic test-only packages emitted
+	// by packages.Load. Iterate alphabetically (or sort the keys
+	// yourself) for stable output.
+	Packages map[string]WorkspacePackage `json:"packages" jsonschema:"Keyed by import path. Excludes vendored dependencies."`
+}
+
+// WorkspaceModule describes a single Go module discovered inside a
+// workspace, returned in [WorkspaceOutput.Modules]. Path is the logical
+// import root declared by the module's go.mod; Dir is the physical
+// filesystem directory containing that go.mod.
+//
+// In go.work-multi-module workspaces, multiple WorkspaceModule entries
+// appear — one per 'use' directive. In single-module workspaces, the
+// slice has exactly one entry whose Dir equals [WorkspaceOutput.Root].
+type WorkspaceModule struct {
+	// Path is the module path declared in go.mod (the 'module <path>'
+	// directive). Other modules import this module by this path.
+	Path string `json:"path" jsonschema:"Module path declared in go.mod (e.g. 'go.thesmos.sh/techne')."`
+	// Dir is the absolute filesystem path of the module root — the
+	// directory containing the module's go.mod.
+	Dir string `json:"dir" jsonschema:"Filesystem directory containing the go.mod."`
+}
+
+// WorkspacePackage is the per-package entry returned by lang.go.workspace.
+// It carries just enough metadata for the agent to decide which packages
+// merit a follow-up [ExploreInput] call: the import path and name (for
+// identification), the directory (for filesystem operations), the first
+// paragraph of the package's godoc (for intent), and an exported-symbol
+// count (for size).
+//
+// Two optional slices appear at higher detail levels. SymbolOrder lists
+// exported symbol names in source order, which preserves the author's
+// intended reading sequence — typically the most important types and
+// constructors cluster near the top of the first file. SymbolLines, set
+// only at [DetailFull], renders one line per exported symbol with its
+// signature or kind plus the first sentence of its doc comment, capped
+// at roughly 120 characters per line and skipped entirely when a symbol
+// has no doc (the handler never fabricates documentation).
+type WorkspacePackage struct {
+	// ImportPath is the full import path of the package, repeated from
+	// the map key for self-describing responses.
+	ImportPath string `json:"import_path" jsonschema:"Full import path of the package."`
+	// Name is the Go package name from the 'package X' clause. Usually
+	// matches the last path segment of ImportPath; differs for packages
+	// like `main` or those that intentionally rename (e.g. `package v1`
+	// in `.../api/v1`).
+	Name string `json:"name" jsonschema:"Go package name (the 'package X' clause)."`
+	// Dir is the absolute filesystem directory containing the package's
+	// source files. Useful as an anchor for filesystem tools or as
+	// input to [ExploreInput] when the agent prefers paths over
+	// import paths.
+	Dir string `json:"dir" jsonschema:"Filesystem directory."`
+	// PackageDoc is the first paragraph of the package's godoc comment
+	// — the comment attached to the 'package X' clause in the first
+	// file that declares one. Empty when the package is undocumented.
+	// Present at [DetailStandard] and [DetailFull].
+	PackageDoc string `json:"package_doc,omitempty" jsonschema:"First paragraph of the package's godoc comment, or empty when none."`
+	// ExportedSyms counts top-level exported declarations: functions,
+	// methods, types, consts, and vars whose name starts with an
+	// uppercase letter. Always populated. Use as a rough "is this
+	// package big?" signal before drilling.
+	ExportedSyms int `json:"exported_syms" jsonschema:"Count of exported top-level symbols."`
+	// InternalSyms counts top-level unexported declarations using the
+	// same kinds as ExportedSyms. Populated only when the request set
+	// IncludePrivate true; otherwise omitted from the JSON.
+	InternalSyms int `json:"internal_syms,omitempty" jsonschema:"Count of unexported top-level symbols. Populated only when include_private is true."`
+	// SymbolOrder lists exported top-level symbol names in source
+	// order across the package's files. Preserves the author's
+	// intended reading sequence — typically the most important types
+	// appear first. Present at [DetailStandard] and [DetailFull].
+	SymbolOrder []string `json:"symbol_order,omitempty" jsonschema:"Top-level exported symbol names in source order. Present in 'standard' and 'full' detail modes."`
+	// SymbolLines renders one human-readable line per exported symbol:
+	// for functions and methods the signature plus the first sentence
+	// of the doc comment, for types the kind ('struct'/'interface'/etc.)
+	// plus the first sentence of the doc. Lines are capped at roughly
+	// 120 characters and symbols without doc comments are omitted (the
+	// handler never fabricates prose). Present only at [DetailFull].
+	SymbolLines []string `json:"symbol_lines,omitempty" jsonschema:"One-line summary per exported symbol ('FuncName(args) returns ...' or 'TypeName struct/interface — brief godoc'). Present only in 'full' detail mode."`
 }

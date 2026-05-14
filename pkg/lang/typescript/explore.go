@@ -48,4 +48,5 @@ import (
 var Explore = tool.Stub[lang.ExploreInput, lang.ExploreOutput](
 	"lang.typescript.explore",
 	"Explore symbols in a TypeScript package. Returns classes, functions, and interfaces, and methods with configurable verbosity.",
+	tool.WithShortDescription("Extract TypeScript classes, functions, interfaces, and methods (stub)"),
 )

@@ -116,6 +116,7 @@ var List = tool.New[ListInput, ListOutput](
 	"Lists directory contents with optional recursion and sorting.",
 	listHandler,
 	tool.Enum("sort_by", "name", "size", "modified"),
+	tool.WithShortDescription("List directory contents with optional recursion and sort order"),
 )
 
 // listHandler implements fs.list. It dispatches to a one-level

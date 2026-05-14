@@ -161,6 +161,7 @@ var Grep = tool.New[GrepInput, GrepOutput](
 	"fs.grep",
 	"Searches for regex patterns in files or directory trees. Auto-detects file vs directory. For Go symbol discovery, prefer lang.go.search which returns structured metadata.",
 	grepHandler,
+	tool.WithShortDescription("Search files or directory trees for a regex with structured match output"),
 )
 
 // grepHandler implements fs.grep. It validates input, composes the

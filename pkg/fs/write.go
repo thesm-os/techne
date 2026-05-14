@@ -93,6 +93,7 @@ var Write = tool.New[WriteInput, WriteOutput](
 	"fs.write",
 	"Writes content to a file. Prefer fs.patch for modifications to existing files — it provides atomicity, diff receipts, and rollback.",
 	writeHandler,
+	tool.WithShortDescription("Write content to a file in truncate or append mode"),
 )
 
 // writeHandler implements fs.write. It optionally creates parent

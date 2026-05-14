@@ -93,6 +93,7 @@ var Stat = tool.New[StatInput, StatOutput](
 	"fs.stat",
 	"Returns file metadata (size, permissions, timestamps).",
 	statHandler,
+	tool.WithShortDescription("Return a file's size, mode, mtime, and type bits in one call"),
 )
 
 // statHandler implements fs.stat. It dispatches to os.Stat or

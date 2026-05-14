@@ -33,4 +33,5 @@ import (
 var Deps = tool.Stub[lang.DepsInput, lang.DepsOutput](
 	"lang.javascript.deps",
 	"Map symbol dependencies in a JavaScript project. Find implementations, callers, and references with causal context.",
+	tool.WithShortDescription("Map JavaScript symbol dependencies — callers, references, implementations (stub)"),
 )

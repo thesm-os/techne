@@ -59,6 +59,7 @@ var Callers = tool.New[lang.CallersInput, lang.DepsResult](
 			},
 		)
 	},
+	tool.WithShortDescription("Find type-checked callers of a Go function or method workspace-wide"),
 )
 
 // Implementations is the lang.go.implementations tool. It returns every
@@ -81,6 +82,7 @@ var Implementations = tool.New[lang.ImplementationsInput, lang.DepsResult](
 	"lang.go.implementations",
 	"PREFER OVER Grep for finding interface implementations. Uses the type checker (Grep can't tell which structs satisfy an interface) and considers both value and pointer receivers. Workspace-local by default; pass include_external=true to include stdlib and dependency implementations.",
 	implementationsHandler,
+	tool.WithShortDescription("Find concrete Go types that implement a given interface"),
 )
 
 // implementationsHandler implements the lang.go.implementations RPC.
@@ -169,6 +171,7 @@ var References = tool.New[lang.ReferencesInput, lang.DepsResult](
 			},
 		)
 	},
+	tool.WithShortDescription("Find every type-checked reference to a Go identifier workspace-wide"),
 )
 
 // Invocations is the lang.go.invocations tool. It returns call sites
@@ -199,6 +202,7 @@ var Invocations = tool.New[lang.InvocationsInput, lang.DepsResult](
 			},
 		)
 	},
+	tool.WithShortDescription("Find call sites that invoke a value typed as a given Go function type"),
 )
 
 // depsLoadMode is the package-load mode shared by all four deps

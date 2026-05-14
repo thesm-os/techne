@@ -60,6 +60,7 @@ var ChangeSignature = tool.New[lang.ChangeSignatureInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Change a Go function signature and update every call site project-wide"),
 )
 
 // convertAddParams maps the public [lang.AddParameter] schema onto the

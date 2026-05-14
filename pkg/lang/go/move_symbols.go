@@ -59,4 +59,5 @@ var MoveSymbols = tool.New[lang.MoveSymbolsInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Move many Go symbols across files in one atomic batch"),
 )

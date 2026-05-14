@@ -39,4 +39,5 @@ import (
 var Explore = tool.Stub[lang.ExploreInput, lang.ExploreOutput](
 	"lang.javascript.explore",
 	"Explore symbols in a JavaScript package. Returns classes, functions, and modules, and methods with configurable verbosity.",
+	tool.WithShortDescription("Extract JavaScript classes, functions, modules, and methods (stub)"),
 )

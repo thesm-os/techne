@@ -102,6 +102,7 @@ var Replace = tool.New[ReplaceInput, ReplaceOutput](
 	"fs.replace",
 	"Find-and-replace within a single file. For multi-file atomic edits, use fs.patch instead.",
 	replaceHandler,
+	tool.WithShortDescription("Regex find-and-replace within a single file with optional dry-run"),
 )
 
 // replaceHandler implements fs.replace. It composes the pattern with

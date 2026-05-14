@@ -31,4 +31,5 @@ import (
 var Deps = tool.Stub[lang.DepsInput, lang.DepsOutput](
 	"lang.python.deps",
 	"Map symbol dependencies in a Python project. Find implementations, callers, and references with causal context.",
+	tool.WithShortDescription("Map Python symbol dependencies — callers, references, implementations (stub)"),
 )

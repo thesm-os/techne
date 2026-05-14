@@ -226,6 +226,7 @@ var GoPatch = tool.New[GoPatchInput, GoPatchOutput](
 	"lang.go.patch",
 	"PREFER OVER Edit for any Go change that needs a build-gate or affects multiple files. Each patch is goimports-formatted, parse-checked before write, and go-build verified after; on failure, files roll back atomically. Multi-patch submissions auto-run as one transaction. Edit is faster for trivial single-line tweaks (typos, comments, log messages); use lang.go.patch when correctness matters or when a refactor produced patches you need to apply. For structural changes (rename, signature, type), use the refactor tools instead — they update references project-wide.",
 	goPatchHandler,
+	tool.WithShortDescription("Apply Go patches with goimports, parse check, and build-gated rollback"),
 )
 
 // goPatchHandler implements the lang.go.patch RPC. Dispatches on the

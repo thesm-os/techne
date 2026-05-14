@@ -61,6 +61,14 @@ import (
 type Tool interface {
 	Name() string
 	Description() string
+	// ShortDescription returns a CLI-friendly one-line summary,
+	// typically under 80 characters. The full Description is
+	// LLM-optimized (multi-sentence with "PREFER OVER" rationale) and
+	// reads poorly in a terminal "Available Commands" listing; the
+	// CLI presenter uses ShortDescription for cobra's Short field.
+	// When a tool does not supply one explicitly the framework
+	// derives a sensible default from Description.
+	ShortDescription() string
 	InputSchema() *jsonschema.Schema
 	OutputSchema() *jsonschema.Schema
 	Execute(ctx context.Context, rawInput json.RawMessage) (any, error)

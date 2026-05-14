@@ -53,4 +53,5 @@ var DeleteFile = tool.New[lang.DeleteFileInput, refactor.Output](
 			Detail:       in.Detail,
 		})
 	},
+	tool.WithShortDescription("Delete a Go source file, rejecting the request if any reference remains"),
 )

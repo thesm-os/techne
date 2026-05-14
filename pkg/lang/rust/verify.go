@@ -31,4 +31,5 @@ import (
 var Verify = tool.Stub[lang.VerifyInput, lang.VerifyOutput](
 	"lang.rust.verify",
 	"Run quality gates on a Rust project. Supports lint, test, bench, and fuzz suites with structured output.",
+	tool.WithShortDescription("Run Rust cargo check/clippy/test/bench/fuzz suites with structured reports (stub)"),
 )
