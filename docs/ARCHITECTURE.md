@@ -116,8 +116,8 @@ independently.
 `Execute(ctx, input, tx)`. The action operates against a `Transaction`
 abstraction; the production implementation
 (`WorkspaceTransaction` in `transaction.go`) stages edits in memory,
-then on `Commit` writes them atomically, runs `goimports` + `go vet`
-+ `go build`, and rolls back on any failure.
+then on `Commit` writes them atomically, runs `goimports`, `go vet`,
+and `go build`, and rolls back on any failure.
 
 **`pkg/lang/go/internal/workspace/`** — unified abstraction over a Go
 module or a `go.work` multi-module setup. Every tool that runs

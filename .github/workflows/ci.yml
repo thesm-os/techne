@@ -33,4 +33,5 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go install go.thesmos.sh/ergon/cmd/ergon@latest
+      - run: ergon bootstrap
       - run: ergon check vuln

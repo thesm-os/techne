@@ -76,7 +76,7 @@ Out of scope:
 We thank the following researchers for responsibly disclosing
 security issues in techne:
 
-_None yet._
+*None yet.*
 
 [github-pvr]: https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability
 [gh-advisories]: https://github.com/thesmos/techne/security/advisories
