@@ -1,0 +1,5 @@
+# Hide generated mock files in PRs
+*_mock_test.go linguist-generated=true
+
+# Hide stringer generated files
+*_string.go linguist-generated=true

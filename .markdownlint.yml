@@ -1,0 +1,40 @@
+# core markdownlint configuration.
+# Rules: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+# Line length — disabled. README and docs have tables,
+# code blocks, and URLs that routinely exceed 80 chars.
+MD013: false
+
+# Multiple headings with same content — disabled.
+MD024: false
+
+# Trailing punctuation — allow "?" for FAQ-style headings.
+MD026:
+  punctuation: ".,;:!"
+
+# Multiple top-level headings — disabled.
+MD025: false
+
+# Inline HTML — disabled.
+MD033: false
+
+# Bare URLs — disabled.
+MD034: false
+
+# First line heading — disabled (YAML frontmatter).
+MD041: false
+
+# Emphasis as heading — disabled.
+MD036: false
+
+# Code block style — fenced.
+MD046:
+  style: fenced
+
+# Fenced code block language — disabled. Some blocks
+# (directory trees, ASCII diagrams) have no language.
+MD040: false
+
+# Table column style — disabled. Compact table style is
+# intentional.
+MD060: false
