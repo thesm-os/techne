@@ -68,5 +68,5 @@ func NewApp(tools []tool.Tool) *App {
 // is stable: the ctx is honoured exactly as documented above once the
 // implementation lands.
 func (*App) Run(ctx context.Context) error {
-	return errors.New("not implemented")
+	return errors.New("tui: not implemented")
 }

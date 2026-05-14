@@ -216,12 +216,12 @@ func Stub[In, Out any](name, description string, opts ...Option) Tool {
 		inputSchema:  inputSchema,
 		outputSchema: outputSchema,
 		execute: func(_ context.Context, _ json.RawMessage) (any, error) {
-			return nil, errors.New("not implemented")
+			return nil, errors.New("tool: not implemented")
 		},
 		registerMCP: func(server *mcp.Server) {
 			stubHandler := func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
 				var zero Out
-				return nil, zero, errors.New("not implemented")
+				return nil, zero, errors.New("tool: not implemented")
 			}
 			mcp.AddTool[In, Out](server, &mcp.Tool{
 				Name:        name,
