@@ -29,10 +29,13 @@ linters:
     - errcheck
     - errorlint
     - govet
-    - nilerr
     - staticcheck
     - unused
     - wastedassign
+    # nilerr disabled: this codebase reports failures in-band via Status
+    # fields on result structs (PatchOutput, SuiteReport, …) and uses the
+    # standard "return nil on WalkDir error" skip idiom. Every flagged
+    # case is intentional, so the rule fires only on legitimate patterns.
     # Modernization
     - modernize
     - unparam
@@ -107,6 +110,13 @@ formatters:
       max-len: 120
     gofumpt:
       extra-rules: true
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(go.thesmos.sh/techne)
+        - blank
+      custom-order: true
 
 issues:
   max-issues-per-linter: 0

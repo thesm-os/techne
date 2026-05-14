@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: techne
+
+before:
+  hooks:
+    - go vet ./...
+
+builds:
+  - id: techne
+    dir: .
+    main: ./cmd/techne
+    binary: techne
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X go.thesmos.sh/techne/internal/version.buildVersion={{.Version}}
+      - -X go.thesmos.sh/techne/internal/version.buildCommit={{.Commit}}
+      - -X go.thesmos.sh/techne/internal/version.buildDate={{.CommitDate}}
+    hooks:
+      post:
+        - cmd: sh -c 'case "{{ .Target }}" in linux_*|windows_amd64_*) exec upx --best --lzma "{{ .Path }}" ;; esac'
+          output: true
+
+archives:
+  - id: default
+    formats: ["tar.gz"]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: New features
+      regexp: "^feat"
+      order: 0
+    - title: Performance
+      regexp: "^perf"
+      order: 1
+    - title: Bug fixes
+      regexp: "^fix"
+      order: 2
+    - title: Test rigor
+      regexp: "^test"
+      order: 3
+    - title: Refactors
+      regexp: "^refactor"
+      order: 4
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^docs"
+      - "^ci"
+      - "^chore"
+      - "^build"
+      - "^style"
+      - "Merge pull request"
+      - "Merge branch"
+
+homebrew_casks:
+  - name: techne
+    # CLI binary inside the cask — goreleaser unpacks the archive
+    # and links binaries[0] into Homebrew's bin/.
+    binaries:
+      - techne
+    homepage: "https://github.com/thesm-os/techne"
+    description: "Task runner for Go projects: bootstrap, format, lint, test, bench, release, and a multi-stage check umbrella."
+    # Tap repo lives at github.com/thesm-os/homebrew-tap.
+    # Cross-repo writes need a PAT with contents:write on the tap;
+    # the release workflow exposes it as $HOMEBREW_TAP_TOKEN.
+    repository:
+      owner: thesm-os
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaser-bot
+      email: bot@thesmos.sh
+    commit_msg_template: "brew: bump {{ .ProjectName }} to {{ .Tag }}"
+    # Skip prereleases (anything with a `-` suffix, e.g. v1.0.0-rc1).
+    skip_upload: auto
+
+release:
+  github:
+    owner: thesm-os
+    name: techne
+  draft: false
+  prerelease: auto
+  footer: |
+    **Full changelog:** https://github.com/thesm-os/techne/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+report_sizes: true
