@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Copyright Thesmos B.V. 2026
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/thesmos/techne/security/advisories/new
+    about: Please report security issues privately via SECURITY.md, NOT a public issue.
+  - name: Discussion / question
+    url: https://github.com/thesmos/techne/discussions
+    about: Open-ended questions, design discussions, and "how do I ..." belong here.

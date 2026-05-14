@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: MIT
+# Copyright Thesmos B.V. 2026
+name: Bug report
+description: A techne tool produced wrong output, crashed, or didn't roll back.
+title: "bug: <one-line summary>"
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please include enough
+        detail that a maintainer can reproduce the issue without going back
+        and forth.
+
+        For security issues, **stop**: see [SECURITY.md](../../SECURITY.md)
+        and report privately instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: techne version
+      description: Output of `techne --version`
+      placeholder: "techne version v0.1.0 (abc1234, built 2026-...)"
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go toolchain version
+      description: Output of `go version`
+      placeholder: "go version go1.26.x linux/amd64"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / architecture
+      placeholder: "Linux x86_64 / macOS arm64 / Windows amd64 / ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        Describe the behaviour you observed. Paste any error output
+        verbatim inside a fenced code block.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: |
+        Be specific. "It should have worked" is not enough — say what the
+        correct outcome looks like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: |
+        The exact `techne` invocation (or MCP request), the project layout
+        it ran against, and the input. A git repo / gist / tarball is
+        ideal; otherwise paste the file contents inline.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Workspace state after the failure
+      description: |
+        If a refactor or patch tool failed, did the build-gate roll back
+        cleanly? Was the workspace left in a broken state? (`git status`
+        output is helpful.)
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I checked existing open issues for duplicates
+          required: true
+        - label: I am on the latest released version (or `main`)
+          required: true
+        - label: This is not a security issue (security issues go to SECURITY.md)
+          required: true

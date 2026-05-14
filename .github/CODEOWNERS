@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MIT
+# Copyright Thesmos B.V. 2026
+#
+# CODEOWNERS — GitHub uses this file to automatically request reviews from
+# the listed owners when a PR touches matching paths. The last matching
+# pattern wins, so put more specific patterns lower.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: every change needs at least one core maintainer's approval.
+*                                       @thesmos/maintainers
+
+# Framework / infrastructure — higher review bar.
+/internal/tool/                         @thesmos/maintainers
+/internal/app/                          @thesmos/maintainers
+/internal/config/                       @thesmos/maintainers
+/internal/version/                      @thesmos/maintainers
+/presenter/                             @thesmos/maintainers
+/cmd/                                   @thesmos/maintainers
+
+# Tool domains.
+/pkg/fs/                                @thesmos/maintainers
+/pkg/lang/                              @thesmos/maintainers
+/pkg/lang/go/                           @thesmos/maintainers
+/pkg/lang/go/refactor/                  @thesmos/maintainers
+/pkg/lang/go/internal/workspace/        @thesmos/maintainers
+/pkg/lang/rust/                         @thesmos/maintainers
+/pkg/lang/python/                       @thesmos/maintainers
+/pkg/lang/javascript/                   @thesmos/maintainers
+/pkg/lang/typescript/                   @thesmos/maintainers
+
+# Build / release / lint configuration — changes here affect every PR's
+# gate, so they warrant maintainer review.
+/.github/                               @thesmos/maintainers
+/Makefile                               @thesmos/maintainers
+/.golangci.yml                          @thesmos/maintainers
+/.goreleaser.yml                        @thesmos/maintainers
+/.pre-commit-config.yaml                @thesmos/maintainers
+
+# Top-level docs / community files.
+/README.md                              @thesmos/maintainers
+/CONTRIBUTING.md                        @thesmos/maintainers
+/CODE_OF_CONDUCT.md                     @thesmos/maintainers
+/SECURITY.md                            @thesmos/maintainers
+/LICENSE                                @thesmos/maintainers

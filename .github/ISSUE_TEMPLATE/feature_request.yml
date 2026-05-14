@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: MIT
+# Copyright Thesmos B.V. 2026
+name: Feature request
+description: Propose a new tool, a new capability on an existing tool, or another improvement.
+title: "feat: <one-line summary>"
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an idea. Techne's bar for new tools is high —
+        each tool should collapse a 3+ turn agent workflow into a single
+        atomic, type-checked, build-gated operation. Help us evaluate
+        the proposal by answering the prompts below.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the agent workflow (or human workflow) that is painful
+        today. Be concrete: how many turns does it take? What goes wrong
+        with the current generic tools? Don't propose a solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the tool or capability you'd like to see. If you're
+        proposing a new tool, sketch the JSON schema (input fields and
+        output fields). If you're extending an existing tool, name it
+        and describe the new field/behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: atomicity
+    attributes:
+      label: Atomicity / build-gate story
+      description: |
+        How does this fit techne's guarantees? What gets staged? What
+        rolls back on failure? If the operation can't be made atomic,
+        explain why a non-atomic version is still better than the
+        generic alternative.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Why not just compose existing techne tools? Why not Read/Edit/Bash?
+        What did you try first?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Domain
+      multiple: false
+      options:
+        - "lang.go.* (Go-aware)"
+        - "lang.rust.* (Rust)"
+        - "lang.python.* (Python)"
+        - "lang.javascript.* / lang.typescript.* (JS/TS)"
+        - "fs.* (filesystem)"
+        - "Framework (internal/tool, presenters, runners)"
+        - "Other / unsure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I checked existing issues for duplicates
+          required: true
+        - label: I'm willing to discuss the design and iterate before implementation
+          required: true
