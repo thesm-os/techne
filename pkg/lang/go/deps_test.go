@@ -27,13 +27,18 @@ func TestDeps(t *testing.T) {
 		// more Syntax files (the test-augmented one is a superset).
 		dir := t.TempDir()
 		mustWriteFileT(t, filepath.Join(dir, "go.mod"), "module example.com/x\n\ngo 1.21\n")
-		mustWriteFileT(t, filepath.Join(dir, "x.go"), "package x\n\nfunc Read() string { return \"r\" }\n")
-		// An internal test file (package x, not x_test) that calls Read.
+		// Use a fixture-unique symbol name to avoid collisions with same-
+		// named functions in the testing-package transitive deps (stdlib
+		// Read/Write/Close appear in dozens of locations once `import
+		// "testing"` is added).
+		mustWriteFileT(t, filepath.Join(dir, "x.go"),
+			"package x\n\nfunc FixtureReadXX() string { return \"r\" }\n")
+		// An internal test file (package x, not x_test) that calls FixtureReadXX.
 		mustWriteFileT(t, filepath.Join(dir, "x_test.go"),
-			"package x\n\nimport \"testing\"\n\nfunc TestReadFromTest(t *testing.T) { _ = Read() }\n")
+			"package x\n\nimport \"testing\"\n\nfunc TestReadFromTest(t *testing.T) { _ = FixtureReadXX() }\n")
 		t.Chdir(dir)
 
-		out := executeDeps(t, golang.Callers, lang.CallersInput{Symbol: "Read"})
+		out := executeDeps(t, golang.Callers, lang.CallersInput{Symbol: "FixtureReadXX"})
 
 		foundTestCaller := false
 		for _, r := range out.Results {
