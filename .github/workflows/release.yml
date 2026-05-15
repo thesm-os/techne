@@ -59,6 +59,13 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
+          # Attest both the archives AND the raw per-target binaries
+          # under dist/<id>_<goos>_<goarch>[_<variant>]/. Including the
+          # binaries lets users verify the installed file directly
+          # (e.g. /opt/homebrew/Caskroom/techne/<ver>/techne) without
+          # having to re-download the archive.
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/**/techne
+            dist/**/techne.exe
