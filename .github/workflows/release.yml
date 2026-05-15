@@ -6,7 +6,8 @@ on:
 permissions:
   contents: write
   packages: write
-  id-token: write # cosign keyless signing reads OIDC tokens
+  id-token: write       # cosign keyless signing + attestation OIDC
+  attestations: write   # actions/attest-build-provenance writes the SLSA attestation
 
 env:
   # goreleaser-cross ships pinned cross toolchains: osxcross (with the
@@ -23,11 +24,6 @@ env:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
-    outputs:
-      # base64-encoded sha256sum-format digest list, consumed by the
-      # SLSA provenance job below. goreleaser already produces this
-      # exact format in dist/checksums.txt — we just base64 it.
-      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,29 +49,16 @@ jobs:
           # goreleaser's homebrew_casks block uses it to bump the cask
           # file on every non-prerelease tag.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      - name: Compute artifact digests for SLSA provenance
-        id: hash
-        # The SLSA generic generator expects `sha256sum`-format lines
-        # ("<hex> <name>\n"), base64-encoded with no wrapping. That's
-        # exactly the layout of goreleaser's checksums.txt.
-        run: |
-          cd dist
-          echo "hashes=$(base64 -w0 < checksums.txt)" >> "$GITHUB_OUTPUT"
-
-  # SLSA Build L3 provenance attestation. Runs on a GitHub-hosted
-  # runner (not in our container) because the reusable workflow needs
-  # direct access to the actions runtime / OIDC token for signing.
-  # Output is `multiple.intoto.jsonl`, attached to the release; users
-  # verify with `slsa-verifier verify-artifact`.
-  provenance:
-    needs: [goreleaser]
-    permissions:
-      actions: read       # read the workflow run that built the artifacts
-      id-token: write     # mint the OIDC token used to sign the attestation
-      contents: write     # upload the attestation to the release
-    # MUST be pinned to a full `vX.Y.Z` tag — slsa-verifier refuses to
-    # verify attestations produced by float / commit refs.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: "${{ needs.goreleaser.outputs.hashes }}"
-      upload-assets: true
+      # SLSA Build L3 provenance attestation. Stored in GitHub's
+      # attestation API (not attached to the release), so it works
+      # even when the repo has "Immutable releases" enabled — the
+      # release itself isn't modified after creation. Users verify
+      # with `gh attestation verify --owner thesm-os <file>` or
+      # `slsa-verifier verify-artifact` against the downloaded
+      # attestation bundle.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip

@@ -6,6 +6,17 @@ project_name: techne
 before:
   hooks:
     - go vet ./...
+    # Pre-generate shell completions and ship them in the archive,
+    # rather than letting Homebrew's `generate_from_command` exec the
+    # binary at install time. Cask runs that during staging — before
+    # any `postflight` hook — so the quarantine xattr is still on the
+    # darwin binary when it tries to run, and Apple Silicon SIGKILLs
+    # it. Generating once at build time on Linux sidesteps that race.
+    - mkdir -p completions
+    - sh -c "go run ./cmd/techne completion bash       > completions/techne.bash"
+    - sh -c "go run ./cmd/techne completion zsh        > completions/techne.zsh"
+    - sh -c "go run ./cmd/techne completion fish       > completions/techne.fish"
+    - sh -c "go run ./cmd/techne completion powershell > completions/techne.ps1"
 
 builds:
   - id: techne
@@ -73,6 +84,13 @@ archives:
     format_overrides:
       - goos: windows
         formats: ["zip"]
+    # Overriding `files` replaces goreleaser's defaults
+    # (LICENSE*, README*), so list them explicitly. The
+    # completions/ tree is produced by the before.hooks above.
+    files:
+      - LICENSE
+      - README*
+      - completions/*
 
 source:
   enabled: true
@@ -134,19 +152,16 @@ homebrew_casks:
       - techne
     homepage: "https://github.com/thesm-os/techne"
     description: "Task runner for Go projects: bootstrap, format, lint, test, bench, release, and a multi-stage check umbrella."
-    # Run `techne completion <shell>` at install time and install the
-    # output into Homebrew's shell-completion dirs. `shell_parameter_format: cobra`
-    # tells goreleaser to pass the shell name as a positional arg,
-    # matching cobra's `completion bash|zsh|fish|powershell` form.
-    generate_completions_from_executable:
-      args:
-        - completion
-      shell_parameter_format: cobra
-      shells:
-        - bash
-        - zsh
-        - fish
-        - pwsh
+    # Pre-built completions shipped inside the archive (see
+    # before.hooks above). Paths are relative to staged_path; Homebrew
+    # symlinks each into the right shell-completion directory and
+    # renames as needed (zsh wants `_techne` in fpath, etc.).
+    # `homebrew_casks.completions` only supports bash/zsh/fish; the
+    # .ps1 stays in the archive for Windows users who unpack manually.
+    completions:
+      bash: completions/techne.bash
+      zsh: completions/techne.zsh
+      fish: completions/techne.fish
     # Without this hook, `brew install --cask` leaves
     # `com.apple.quarantine` on the binary; Gatekeeper then SIGKILLs
     # the ad-hoc-signed Mach-O at exec on Apple Silicon. (Cask's
