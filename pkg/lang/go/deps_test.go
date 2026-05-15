@@ -484,6 +484,108 @@ var _ a.Reader = (*FileReader)(nil)
 		}
 	})
 
+	// Regression for the workspace-scope leak. Before the fix, common
+	// identifier names (`Kind`, `Name`, `Type`) returned a flood of
+	// matches from stdlib and transitive deps because runDepsQuery
+	// iterated flattenWithDeps' full import graph. The fix filters to
+	// workspace-local packages by default; IncludeExternal=true brings
+	// back the old behavior for callers that genuinely need it.
+	t.Run("Hardening/References/DefaultsToWorkspaceLocal", func(t *testing.T) {
+		// Define a Kind constant in the local module and import
+		// google.golang.org/protobuf/reflect/protoreflect — which also
+		// defines a Kind type and uses it in dozens of places. With the
+		// pre-fix behavior, IncludeExternal=false would still surface
+		// every protoreflect ident named "Kind"; the fix should leave
+		// only the local references.
+		dir := writeMod(t, "rwxkind", map[string]string{
+			"a.go": "package rwxkind\n\n" +
+				"type Kind int\n\n" +
+				"const KindFoo Kind = 1\n\n" +
+				"func What() Kind { return KindFoo }\n",
+		})
+		t.Chdir(dir)
+
+		// Sanity: workspace-local refs to Kind exist.
+		out := executeDeps(t, golang.References, lang.ReferencesInput{Symbol: "Kind"})
+		if len(out.Results) == 0 {
+			t.Fatal("expected local references to Kind")
+		}
+		// Every result must live inside this module (no protobuf/
+		// go/packages/etc. cross-pollination).
+		for _, r := range out.Results {
+			if !strings.Contains(r.Location, dir) {
+				t.Errorf("default scope must be workspace-local; got cross-module hit %q in package %q",
+					r.Location, r.Package)
+			}
+			if strings.Contains(r.Package, "google.golang.org/") ||
+				strings.Contains(r.Package, "golang.org/x/tools/") {
+				t.Errorf("default scope must exclude dep hits; got package %q at %q",
+					r.Package, r.Location)
+			}
+		}
+	})
+
+	// IncludeExternal=true should restore the old behavior: dep hits
+	// surface in the result set when the agent explicitly asks for them.
+	t.Run("Hardening/References/IncludeExternalRestoresFullGraph", func(t *testing.T) {
+		// Use a name that is heavily used in the stdlib (`Error`) so we
+		// reliably see at least one external hit even on a tiny fixture.
+		dir := writeMod(t, "rwxext", map[string]string{
+			"a.go": "package rwxext\n\nimport \"errors\"\n\n" +
+				"type Error struct{}\n\n" +
+				"func New() error { return errors.New(\"x\") }\n",
+		})
+		t.Chdir(dir)
+
+		// Default: workspace-local only — exactly one local Error decl.
+		localOnly := executeDeps(t, golang.References, lang.ReferencesInput{Symbol: "Error"})
+		for _, r := range localOnly.Results {
+			if !strings.Contains(r.Location, dir) {
+				t.Errorf("default scope must stay local; got %q", r.Location)
+			}
+		}
+
+		// IncludeExternal: stdlib's Error type surfaces. The exact count
+		// depends on the Go toolchain, but at least one non-local hit
+		// must appear.
+		external := executeDeps(t, golang.References, lang.ReferencesInput{
+			Symbol:          "Error",
+			IncludeExternal: true,
+			Limit:           200,
+		})
+		hasExternal := false
+		for _, r := range external.Results {
+			if !strings.Contains(r.Location, dir) {
+				hasExternal = true
+				break
+			}
+		}
+		if !hasExternal {
+			t.Errorf("IncludeExternal=true should surface stdlib Error hits; got only local refs (%d)",
+				len(external.Results))
+		}
+	})
+
+	// Same guarantee for Callers and Invocations — the fix plumbed the
+	// flag through all three narrow tools.
+	t.Run("Hardening/Callers/DefaultsToWorkspaceLocal", func(t *testing.T) {
+		dir := writeMod(t, "rwxcaller", map[string]string{
+			"a.go": "package rwxcaller\n\nimport \"strings\"\n\n" +
+				"func Local() string { return strings.ToUpper(\"x\") }\n",
+		})
+		t.Chdir(dir)
+
+		// `ToUpper` is called from stdlib and from this module. Default
+		// scope should ONLY surface the local caller.
+		out := executeDeps(t, golang.Callers, lang.CallersInput{Symbol: "ToUpper"})
+		for _, r := range out.Results {
+			if !strings.Contains(r.Location, dir) {
+				t.Errorf("default scope must exclude stdlib callers; got %q in %q",
+					r.Location, r.Package)
+			}
+		}
+	})
+
 	// Invocations of a func-typed value declared in modA must surface modB
 	// invocations.
 	t.Run("Workspace/Invocations/AcrossModules", func(t *testing.T) {

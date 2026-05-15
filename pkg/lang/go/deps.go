@@ -41,18 +41,25 @@ import (
 // filtering by package would hide them. In go.work mode the load is
 // expanded across every use directive.
 //
+// By default the search is workspace-local: packages whose import path
+// sits outside the workspace's own module roots are skipped before the
+// finder runs. Pass IncludeExternal=true to include stdlib and external
+// callers — useful when verifying that an external framework actually
+// invokes a callback the workspace registered with it.
+//
 // Results are capped at input.Limit (default 50) and trimmed to the
 // requested Detail level (summary/standard/full) so the agent can pick
 // the smallest payload that answers its question.
 var Callers = tool.New[lang.CallersInput, lang.DepsResult](
 	"lang.go.callers",
-	"PREFER OVER Grep for finding callers of a Go function. Returns type-checked call sites (Grep matches function-name strings and gives false positives from same-named identifiers in unrelated scopes). Each result includes the caller's location, surrounding docblock, and a one-line call snippet so you understand HOW the result is used. Workspace-aware: traverses go.work if present.",
+	"PREFER OVER Grep for finding callers of a Go function. Returns type-checked call sites (Grep matches function-name strings and gives false positives from same-named identifiers in unrelated scopes). Each result includes the caller's location, surrounding docblock, and a one-line call snippet so you understand HOW the result is used. Workspace-local by default (traverses go.work modules); pass include_external=true to include stdlib and dependency callers.",
 	func(ctx context.Context, in lang.CallersInput) (lang.DepsResult, error) {
 		return runDepsQueryWithDetail(
 			ctx,
 			in.Symbol,
 			in.Package,
 			in.Limit,
+			in.IncludeExternal,
 			in.Detail,
 			func(allPkgs map[string]*packages.Package, fset *token.FileSet) []lang.DepReference {
 				return findCallers(in.Symbol, allPkgs)
@@ -91,9 +98,10 @@ var Implementations = tool.New[lang.ImplementationsInput, lang.DepsResult](
 // type scope looking for named types whose value or pointer
 // instantiation implements the target interface.
 //
-// The localRoots set is computed from the initially-loaded packages so
-// the IncludeExternal filter can distinguish workspace-local types
-// from transitive-dep types after flattenWithDeps expands the graph.
+// The localRoots set is the union of workspace module import-path
+// roots, so the IncludeExternal filter can distinguish workspace-local
+// types from transitive-dep types after flattenWithDeps expands the
+// graph regardless of whether the caller narrowed by Package.
 func implementationsHandler(ctx context.Context, in lang.ImplementationsInput) (lang.DepsResult, error) {
 	out := lang.DepsResult{Symbol: in.Symbol}
 	if in.Symbol == "" {
@@ -119,16 +127,8 @@ func implementationsHandler(ctx context.Context, in lang.ImplementationsInput) (
 		return out, fmt.Errorf("load packages: %w", err)
 	}
 
-	// Build a set of workspace-local roots so the "external" filter can
-	// distinguish loaded-but-external packages (transitive deps) from
-	// loaded-and-local packages (workspace use directives).
-	localRoots := make(map[string]bool, len(pkgs))
-	for _, p := range pkgs {
-		localRoots[p.PkgPath] = true
-	}
-
 	allPkgs := flattenWithDeps(pkgs)
-	refs := findImplementations(in.Symbol, allPkgs, localRoots, in.IncludeExternal)
+	refs := findImplementations(in.Symbol, allPkgs, workspaceLocalRoots(ws), in.IncludeExternal)
 
 	limit := in.Limit
 	if limit <= 0 {
@@ -156,15 +156,23 @@ func implementationsHandler(ctx context.Context, in lang.ImplementationsInput) (
 // the target Foo). Use lang.go.callers instead when only call sites of
 // a function matter — it returns the same identity check but filters
 // to CallExpr nodes.
+//
+// By default the search is workspace-local: packages whose import path
+// sits outside the workspace's own module roots are skipped before the
+// finder runs. Without this default, a common identifier like "Kind"
+// returns a flood of matches from protobuf, go/packages, and other
+// transitive deps that share the name. Pass IncludeExternal=true when
+// references in deps are genuinely what you want.
 var References = tool.New[lang.ReferencesInput, lang.DepsResult](
 	"lang.go.references",
-	"PREFER OVER Grep for finding all uses of a Go identifier. Type-checked: returns every reference (reads, writes, type usages, declarations) including method-on-receiver cases that Grep can't disambiguate. Use lang.go.callers instead when you specifically want call sites of a function.",
+	"PREFER OVER Grep for finding all uses of a Go identifier. Type-checked: returns every reference (reads, writes, type usages, declarations) including method-on-receiver cases that Grep can't disambiguate. Workspace-local by default — common names like 'Kind' or 'Name' no longer collide with protobuf/go-packages dep noise; pass include_external=true to include stdlib and dependency references. Use lang.go.callers instead when you specifically want call sites of a function.",
 	func(ctx context.Context, in lang.ReferencesInput) (lang.DepsResult, error) {
 		return runDepsQueryWithDetail(
 			ctx,
 			in.Symbol,
 			in.Package,
 			in.Limit,
+			in.IncludeExternal,
 			in.Detail,
 			func(allPkgs map[string]*packages.Package, fset *token.FileSet) []lang.DepReference {
 				return findReferences(in.Symbol, allPkgs)
@@ -187,15 +195,22 @@ var References = tool.New[lang.ReferencesInput, lang.DepsResult](
 // Use this when refactoring function-typed parameters or callbacks —
 // the shape that lang.go.callers does not match because the callee
 // identifier resolves to a parameter, not the type declaration.
+//
+// By default the search is workspace-local: packages whose import path
+// sits outside the workspace's own module roots are skipped. Pass
+// IncludeExternal=true when the function type itself lives in an
+// external package (e.g. http.HandlerFunc) and you want invocation
+// sites from across the dep graph.
 var Invocations = tool.New[lang.InvocationsInput, lang.DepsResult](
 	"lang.go.invocations",
-	"NO GENERIC ALTERNATIVE. Finds call sites that invoke a value typed as the given function-type symbol. Catches 'h(data)' inside a func that takes 'h Handler' — Grep can't distinguish this from any other identifier call, and gopls doesn't expose this query at all. Use when refactoring function-typed parameters or callbacks.",
+	"NO GENERIC ALTERNATIVE. Finds call sites that invoke a value typed as the given function-type symbol. Catches 'h(data)' inside a func that takes 'h Handler' — Grep can't distinguish this from any other identifier call, and gopls doesn't expose this query at all. Workspace-local by default; pass include_external=true when the function type lives in an external package (e.g. http.HandlerFunc). Use when refactoring function-typed parameters or callbacks.",
 	func(ctx context.Context, in lang.InvocationsInput) (lang.DepsResult, error) {
 		return runDepsQueryWithDetail(
 			ctx,
 			in.Symbol,
 			in.Package,
 			in.Limit,
+			in.IncludeExternal,
 			in.Detail,
 			func(allPkgs map[string]*packages.Package, _ *token.FileSet) []lang.DepReference {
 				return findInvocations(in.Symbol, allPkgs)
@@ -214,6 +229,38 @@ var Invocations = tool.New[lang.InvocationsInput, lang.DepsResult](
 const depsLoadMode = packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
 	packages.NeedImports | packages.NeedName | packages.NeedDeps |
 	packages.NeedFiles | packages.NeedCompiledGoFiles
+
+// workspaceLocalRoots returns the import-path roots of every module in
+// the workspace. A *packages.Package whose PkgPath equals one of these
+// — or is a sub-import-path of one (root + "/") — is workspace-local;
+// anything else is a transitive dep (stdlib or external module).
+//
+// Using module roots — rather than the set of directly-loaded
+// packages — makes the predicate stable regardless of whether the
+// caller passed a narrow Package pattern: a callers query rooted at one
+// package still reports cross-package workspace callers and excludes
+// only deps/stdlib.
+func workspaceLocalRoots(ws *workspace.Workspace) []string {
+	mods := ws.Modules()
+	roots := make([]string, 0, len(mods))
+	for _, m := range mods {
+		if m.Path != "" {
+			roots = append(roots, m.Path)
+		}
+	}
+	return roots
+}
+
+// isWorkspaceLocalPkg reports whether pkgPath sits inside one of the
+// workspace module roots produced by workspaceLocalRoots.
+func isWorkspaceLocalPkg(pkgPath string, roots []string) bool {
+	for _, root := range roots {
+		if pkgPath == root || strings.HasPrefix(pkgPath, root+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // defaultDepsLimit caps deps-query results when the caller does not
 // specify Limit. Chosen to be small enough that an agent can read every
@@ -268,10 +315,11 @@ func runDepsQueryWithDetail(
 	ctx context.Context,
 	symbol, packagePat string,
 	limit int,
+	includeExternal bool,
 	detail string,
 	find func(allPkgs map[string]*packages.Package, fset *token.FileSet) []lang.DepReference,
 ) (lang.DepsResult, error) {
-	out, err := runDepsQuery(ctx, symbol, packagePat, limit, find)
+	out, err := runDepsQuery(ctx, symbol, packagePat, limit, includeExternal, find)
 	if err != nil {
 		return out, err
 	}
@@ -283,13 +331,22 @@ func runDepsQueryWithDetail(
 // and invocations tools (implementations has its own variant because
 // it also needs the localRoots set). It discovers the workspace, loads
 // packages once with depsLoadMode, flattens the import graph into a
-// single (path -> *Package) map, and invokes the supplied finder.
+// single (path -> *Package) map, optionally trims that map to
+// workspace-local packages, and invokes the supplied finder.
 //
 // The workspace is always loaded — the Package input is treated as a
 // symbol-resolution disambiguator ("the X defined in this package, not
 // the X defined elsewhere"), not a search-space limiter. Call sites of
 // a modA symbol may legitimately live in modB; pre-filtering by package
 // would hide them.
+//
+// When includeExternal is false (the default), packages outside the
+// workspace's own module roots are dropped before the finder sees them.
+// This is what stops a `references` query for a common identifier like
+// "Kind" from drowning in matches from protobuf, go/packages, etc.
+// Callers that genuinely want deps in the result set — e.g. tracing
+// invocations of an `http.HandlerFunc`-typed value — pass
+// includeExternal=true to keep the full import graph in play.
 //
 // In go.work mode a second load is performed without patterns so every
 // use directive is expanded — single-package loads in go.work mode
@@ -298,6 +355,7 @@ func runDepsQuery(
 	ctx context.Context,
 	symbol, packagePat string,
 	limit int,
+	includeExternal bool,
 	find func(allPkgs map[string]*packages.Package, fset *token.FileSet) []lang.DepReference,
 ) (lang.DepsResult, error) {
 	out := lang.DepsResult{Symbol: symbol}
@@ -336,6 +394,16 @@ func runDepsQuery(
 	}
 
 	allPkgs := flattenWithDeps(pkgs)
+	if !includeExternal {
+		roots := workspaceLocalRoots(ws)
+		filtered := make(map[string]*packages.Package, len(allPkgs))
+		for path, p := range allPkgs {
+			if isWorkspaceLocalPkg(path, roots) {
+				filtered[path] = p
+			}
+		}
+		allPkgs = filtered
+	}
 	refs := find(allPkgs, fset)
 
 	if limit <= 0 {
@@ -391,15 +459,16 @@ func buildDepsNextActions(refs []lang.DepReference) []lang.NextAction {
 //     target. The pointer-form check matters because methods declared
 //     on a pointer receiver are only in the method set of *T, not T.
 //
-// localRoots is the set of package paths considered workspace-local
-// (populated from the originally-loaded packages, before
-// flattenWithDeps expanded the import graph). When IncludeExternal
-// is false, packages outside that set are skipped except for the
-// interface's own package, which is always reported.
+// localRoots is the slice of workspace module import-path roots
+// produced by workspaceLocalRoots. When includeExternal is false,
+// packages whose PkgPath is not inside one of those roots are skipped
+// — except the interface's own package, which is always reported so
+// that a workspace-defined interface still surfaces implementations
+// declared in a stdlib/external package it's used with.
 func findImplementations(
 	symbol string,
 	allPkgs map[string]*packages.Package,
-	localRoots map[string]bool,
+	localRoots []string,
 	includeExternal bool,
 ) []lang.DepReference {
 	// First find the interface type by name.
@@ -436,7 +505,7 @@ func findImplementations(
 	for _, p := range allPkgs {
 		// Skip non-local packages unless requested. Workspace-local roots
 		// always pass; the interface's own package always passes.
-		if !includeExternal && p.PkgPath != targetPkg && !localRoots[p.PkgPath] {
+		if !includeExternal && p.PkgPath != targetPkg && !isWorkspaceLocalPkg(p.PkgPath, localRoots) {
 			continue
 		}
 		if p.Types == nil {

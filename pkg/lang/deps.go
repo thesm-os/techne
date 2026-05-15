@@ -38,6 +38,14 @@ type CallersInput struct {
 	// fastest and least-ambiguous case. Set Package only when the target
 	// symbol lives elsewhere.
 	Package string `json:"package,omitempty" jsonschema:"Package import path or relative path containing the symbol. Defaults to the current directory."`
+	// IncludeExternal expands the caller search beyond the workspace into
+	// external Go modules and the standard library. Default false, which
+	// restricts hits to packages whose import path sits inside one of the
+	// workspace's own module roots. The default is right for almost every
+	// refactoring question ("who in MY code calls this?"); enable when
+	// genuinely tracing a stdlib or third-party caller — e.g. proving that
+	// the standard library actually invokes a callback you registered.
+	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include callers from external packages and the standard library. Default: false (workspace-local only)."`
 	// Limit caps the number of caller sites returned. Defaults to 50 when
 	// zero. A small cap keeps the response within an LLM's effective
 	// context; if the response sets Truncated=true the agent should narrow
@@ -124,6 +132,15 @@ type ReferencesInput struct {
 	// which matters when the same bare name (`Run`, `New`) is defined in
 	// multiple packages.
 	Package string `json:"package,omitempty" jsonschema:"Package containing the symbol. Defaults to the current directory."`
+	// IncludeExternal expands the reference search beyond the workspace
+	// into external Go modules and the standard library. Default false,
+	// which restricts hits to packages whose import path sits inside one
+	// of the workspace's own module roots — searching for a common name
+	// like `Kind` without this filter would drown in matches from protobuf,
+	// go/packages, and similar transitive deps. Enable when you genuinely
+	// want references in deps too, e.g. when auditing every site that
+	// touches a re-exported identifier across the dep graph.
+	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include references from external packages and the standard library. Default: false (workspace-local only)."`
 	// Limit caps the number of reference sites returned. Defaults to 50
 	// when zero. Reference counts on widely-used identifiers (`error`,
 	// `string`, `nil`) can run into the thousands; the cap protects the
@@ -169,6 +186,14 @@ type InvocationsInput struct {
 	// working directory. The invocation search itself spans the whole
 	// workspace; this field only resolves the type.
 	Package string `json:"package,omitempty" jsonschema:"Package containing the function-type symbol. Defaults to the current directory."`
+	// IncludeExternal expands the invocation search beyond the workspace
+	// into external Go modules and the standard library. Default false,
+	// which restricts hits to packages whose import path sits inside one
+	// of the workspace's own module roots. Enable when the function-type
+	// you're tracing lives in an external package (`http.HandlerFunc`,
+	// `middleware.Func`) and you need invocation sites in that ecosystem,
+	// not just your own.
+	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include invocations from external packages and the standard library. Default: false (workspace-local only)."`
 	// Limit caps the number of invocation sites returned. Defaults to 50
 	// when zero. Hot callback types (HTTP handlers, middleware) can have
 	// hundreds of invocation sites — narrow by Package or raise Limit when
