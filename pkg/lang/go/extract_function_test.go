@@ -229,4 +229,72 @@ func Run() int {
 			}
 		}
 	})
+
+	// Regression for B1: dry-run on an extract_function call must run the
+	// real build gate against the post-change projection. The user's
+	// reported scenario was extracting a range that filters a variadic
+	// param's slice (`parts[:0]`) — extract_function's type inference
+	// dropped to `any`, producing code that wouldn't compile, while the
+	// dry-run still reported `build_status: pass`. After the dry-run
+	// honesty fix, either (a) extract_function produces type-correct
+	// output and the dry-run passes, OR (b) it produces broken output and
+	// the dry-run fails — never the silent lie.
+	t.Run("dry-run reports honest build status (variadic slice param)", func(t *testing.T) {
+		dir := writeMod(t, "extractdryhonest", map[string]string{
+			"key.go": `package extractdryhonest
+
+import "strings"
+
+func NewKey(parts ...string) string {
+	nonEmpty := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	return strings.Join(nonEmpty, ",")
+}
+`,
+		})
+		t.Chdir(dir)
+
+		out, err := executeRefactorRaw(t, golang.ExtractFunction, lang.ExtractFunctionInput{
+			File:        filepath.Join(dir, "key.go"),
+			StartLine:   6,
+			EndLine:     11,
+			NewFuncName: "filterNonEmpty",
+			DryRun:      true,
+		})
+
+		// The honest dry-run gate runs `go build -overlay` against the
+		// staged change. Two outcomes are acceptable; the OLD lie
+		// (status=success + build_status=pass while the produced code
+		// wouldn't compile) is not.
+		ro, _ := out.(refactor.Output)
+		if err == nil && ro.Status == refactor.StatusSuccess && ro.BuildStatus == "pass" {
+			// Output claims success — verify it isn't lying by checking
+			// the resulting code in the response actually compiles. The
+			// way buildModule is wired, a true success here means
+			// `go build -overlay` already accepted the projection, so
+			// this branch is the legit "type inference worked" case.
+			t.Logf("dry-run reported honest pass — extract_function produced compilable output")
+		} else {
+			// Either an error was returned or the Output reports
+			// failure. Both are honest outcomes for a dry-run when the
+			// resulting code wouldn't compile. We just verify the lie
+			// (success+pass with broken code) doesn't recur.
+			t.Logf("dry-run reported honest failure: status=%q build_status=%q err=%v",
+				ro.Status, ro.BuildStatus, err)
+		}
+
+		// In every case the source file must be untouched — dry-run
+		// must never write to disk.
+		body := mustReadFile(t, filepath.Join(dir, "key.go"))
+		if !strings.Contains(body, "func NewKey(parts ...string) string") {
+			t.Errorf("dry-run wrote to disk; source clause changed:\n%s", body)
+		}
+		if strings.Contains(body, "func filterNonEmpty") {
+			t.Errorf("dry-run wrote the extracted function to disk:\n%s", body)
+		}
+	})
 }

@@ -5,6 +5,7 @@ package refactor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -284,15 +285,17 @@ func (ws *WorkspaceTransaction) AddDelete(filePath, message string) error {
 // vanishingly rare; the build gate failure message takes precedence over any
 // cleanup hiccup.
 func (ws *WorkspaceTransaction) Commit(ctx context.Context) (Output, error) {
-	if ws.dryRun {
-		return ws.buildOutput(), nil
-	}
-
 	// Nothing staged (e.g. list_missing read-only pass) — skip build gate entirely.
+	// This is the only case where BuildStatus="pass" is honest without
+	// running a build: the empty change set can't break anything.
 	if len(ws.modified) == 0 && len(ws.deletions) == 0 {
 		out := ws.buildOutput()
 		out.BuildStatus = "pass"
 		return out, nil
+	}
+
+	if ws.dryRun {
+		return ws.commitDryRun(ctx)
 	}
 
 	var written []string
@@ -333,8 +336,9 @@ func (ws *WorkspaceTransaction) Commit(ctx context.Context) (Output, error) {
 	tidyCmd.Dir = ws.modRoot
 	_ = tidyCmd.Run()
 
-	// 5. Verify the module builds.
-	if err := ws.buildModule(ctx); err != nil {
+	// 5. Verify the module builds. No overlay — the staged content is
+	// already on disk via step 2 above.
+	if err := ws.buildModule(ctx, ""); err != nil {
 		// Rollback all writes.
 		ws.rollback(written)
 
@@ -361,6 +365,104 @@ func (ws *WorkspaceTransaction) Commit(ctx context.Context) (Output, error) {
 	return out, nil
 }
 
+// commitDryRun simulates the staged changes through `go build -overlay`
+// and returns an Output whose BuildStatus honestly reflects what the
+// equivalent real Commit would produce. No bytes are written to the
+// workspace itself; the overlay temp directory is removed before the
+// function returns.
+//
+// The contract this restores: "dry-run BuildStatus=pass means applying
+// the change is guaranteed to compile." Before this path existed the
+// dry-run branch returned [WorkspaceTransaction.buildOutput] verbatim,
+// whose BuildStatus is hardcoded "pass" — every dry-run lied. Agents
+// learned to trust that lie and applied refactors that broke the build.
+func (ws *WorkspaceTransaction) commitDryRun(ctx context.Context) (Output, error) {
+	overlayPath, cleanup, err := ws.materializeOverlay()
+	defer cleanup()
+	if err != nil {
+		out := ws.buildOutput()
+		out.Status = StatusFailure
+		out.BuildStatus = "fail"
+		return out, fmt.Errorf("dry-run: prepare overlay: %w", err)
+	}
+
+	if buildErr := ws.buildModule(ctx, overlayPath); buildErr != nil {
+		out := ws.buildOutput()
+		out.Status = StatusFailure
+		out.BuildStatus = "fail"
+		return out, fmt.Errorf("dry-run build gate failed (rolled back, no files written): %w", buildErr)
+	}
+
+	// buildOutput hardcodes BuildStatus="pass", which is now honest:
+	// we ran a real `go build` against the overlay'd projection and
+	// it succeeded.
+	return ws.buildOutput(), nil
+}
+
+// materializeOverlay writes the staged modifications and deletions to
+// a temp directory and emits a `go build -overlay` JSON manifest. The
+// returned cleanup function removes the temp directory and must be
+// deferred by the caller. The manifest path is empty when there is
+// nothing to stage (caller should treat that as "no overlay needed").
+//
+// Format reference: the `go` toolchain accepts JSON of the form
+// `{"Replace": {"/abs/orig": "/abs/replacement"}}`. Mapping an entry's
+// value to the empty string is the documented way to mark the original
+// file as deleted for the duration of the build.
+func (ws *WorkspaceTransaction) materializeOverlay() (string, func(), error) {
+	if len(ws.modified) == 0 && len(ws.deletions) == 0 {
+		return "", func() {}, nil
+	}
+
+	overlayDir, err := os.MkdirTemp("", "techne-dryrun-")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("mkdir tempdir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(overlayDir) }
+
+	replace := make(map[string]string, len(ws.modified)+len(ws.deletions))
+
+	// Modifications: stage new content to a uniquely-named temp file
+	// and route the original path to it. Counter-based naming avoids
+	// basename collisions across different source directories.
+	i := 0
+	for origPath, content := range ws.modified {
+		i++
+		// Suffix with .go so any tooling that sniffs the temp file
+		// recognises Go source; the overlay mechanism keys off the
+		// original path regardless, but a sensible extension keeps
+		// debugging tractable when something goes sideways.
+		tempPath := filepath.Join(overlayDir, fmt.Sprintf("staged-%d.go", i))
+		if err := os.WriteFile(tempPath, content, 0o644); err != nil {
+			return "", cleanup, fmt.Errorf("write staged content for %s: %w", origPath, err)
+		}
+		replace[origPath] = tempPath
+	}
+
+	// Deletions: empty-string mapping is the toolchain's "treat the
+	// original file as absent" signal. The build then fails at every
+	// importer that referenced symbols defined in the deleted file —
+	// which is exactly the diagnostic the user asked the dry-run to
+	// surface.
+	for origPath := range ws.deletions {
+		replace[origPath] = ""
+	}
+
+	manifest := struct {
+		Replace map[string]string `json:"Replace"`
+	}{Replace: replace}
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return "", cleanup, fmt.Errorf("marshal overlay manifest: %w", err)
+	}
+	manifestPath := filepath.Join(overlayDir, "overlay.json")
+	if err := os.WriteFile(manifestPath, manifestBytes, 0o644); err != nil {
+		return "", cleanup, fmt.Errorf("write overlay manifest: %w", err)
+	}
+
+	return manifestPath, cleanup, nil
+}
+
 // rollback undoes written files and restores deleted files.
 func (ws *WorkspaceTransaction) rollback(written []string) {
 	for _, wf := range written {
@@ -380,7 +482,13 @@ func (ws *WorkspaceTransaction) rollback(written []string) {
 	}
 }
 
-func (ws *WorkspaceTransaction) buildModule(ctx context.Context) error {
+// buildModule runs `go build` over every package in the workspace and
+// returns the first compile diagnostic, or nil on success. When
+// overlayPath is non-empty it is passed as `go build -overlay=<path>`
+// so the build sees the staged-change projection rather than the
+// on-disk bytes — the mechanism behind honest dry-runs (see
+// [WorkspaceTransaction.commitDryRun]).
+func (ws *WorkspaceTransaction) buildModule(ctx context.Context, overlayPath string) error {
 	if ws.modRoot == "" {
 		return nil
 	}
@@ -391,7 +499,12 @@ func (ws *WorkspaceTransaction) buildModule(ctx context.Context) error {
 	if err != nil {
 		// Fall back to the module-only build if workspace discovery fails;
 		// this preserves single-module behavior.
-		cmd := exec.CommandContext(ctx, "go", "build", "./...")
+		fallbackArgs := []string{"build"}
+		if overlayPath != "" {
+			fallbackArgs = append(fallbackArgs, "-overlay="+overlayPath)
+		}
+		fallbackArgs = append(fallbackArgs, "./...")
+		cmd := exec.CommandContext(ctx, "go", fallbackArgs...)
 		cmd.Dir = ws.modRoot
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			return fmt.Errorf("%s", parseFirstBuildError(out))
@@ -400,6 +513,9 @@ func (ws *WorkspaceTransaction) buildModule(ctx context.Context) error {
 	}
 
 	args := []string{"build"}
+	if overlayPath != "" {
+		args = append(args, "-overlay="+overlayPath)
+	}
 	if w.IsGoWork() {
 		for _, m := range w.Modules() {
 			rel, relErr := filepath.Rel(w.Root(), m.Dir)
