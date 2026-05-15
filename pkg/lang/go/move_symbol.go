@@ -43,7 +43,7 @@ import (
 // [refactor.Output] surfaced by every refactor tool.
 var MoveSymbol = tool.New[lang.MoveSymbolInput, refactor.Output](
 	"lang.go.move_symbol",
-	"PREFER OVER Read + Edit when moving a Go symbol between files in the same package. One call removes the symbol (and its receiver methods, if any) from the source file and adds it to the target with doc comments preserved. Manual move misses receiver methods and breaks blank-line spacing.",
+	"PREFER OVER Read + Edit when moving a Go symbol between files in the same package. One call removes the symbol (and its receiver methods, if any) from the source file and adds it to the target with doc comments preserved. Manual move misses receiver methods and breaks blank-line spacing. CROSS-PACKAGE: this tool refuses cross-package moves — use lang.go.move_file (the file IS the symbol) or extract-then-move-file (file has other symbols).",
 	func(ctx context.Context, in lang.MoveSymbolInput) (refactor.Output, error) {
 		return runRefactorAction(ctx, refactor.Input{
 			Action:       refactor.ActionMoveSymbol,

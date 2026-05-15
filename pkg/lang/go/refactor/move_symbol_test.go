@@ -215,7 +215,13 @@ func Gamma() int { return 3 }
 		verifyModuleIntegrity(t, dir)
 	})
 
-	t.Run("cross-package move returns descriptive error", func(t *testing.T) {
+	t.Run("cross-package move (single-symbol file) routes to move_file", func(t *testing.T) {
+		// When the source file's only top-level declaration is the symbol
+		// being moved, the equivalent operation is move_file (it relocates
+		// the whole file AND rewrites every importer atomically). The
+		// error message should name move_file specifically so the agent
+		// doesn't have to guess between move_file, move_package, and
+		// extract-then-move-file.
 		dir := setupTestModule(t)
 		writeTestFile(t, dir, "pkga/a.go", "package pkga\n\nfunc Func() int { return 1 }\n")
 		writeTestFile(t, dir, "pkgb/b.go", "package pkgb\n")
@@ -230,8 +236,46 @@ func Gamma() int { return 3 }
 		if err == nil {
 			t.Fatal("expected error for cross-package move")
 		}
-		if !strings.Contains(err.Error(), "cross-package") {
+		msg := err.Error()
+		if !strings.Contains(msg, "cross-package") {
 			t.Errorf("expected 'cross-package' in error, got: %v", err)
+		}
+		if !strings.Contains(msg, "move_file") {
+			t.Errorf("single-symbol file should route to move_file; got: %v", err)
+		}
+		if strings.Contains(msg, "Two-step") || strings.Contains(msg, "two-step") {
+			t.Errorf("single-symbol file should NOT suggest the two-step pattern; got: %v", err)
+		}
+	})
+
+	t.Run("cross-package move (multi-symbol file) routes to extract-then-move-file", func(t *testing.T) {
+		// When the source file contains other declarations beyond the
+		// symbol being moved, naively relocating the whole file would
+		// drag the siblings along — wrong. The error should recommend
+		// the established two-step pattern: move_symbol within the
+		// source package first, then move_file across packages.
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "pkga/a.go", "package pkga\n\n"+
+			"func TargetFunc() int { return 1 }\n\n"+
+			"func KeepMe() int { return 2 }\n")
+		writeTestFile(t, dir, "pkgb/b.go", "package pkgb\n")
+
+		_, err := Handle(t.Context(), Input{
+			Action:     ActionMoveSymbol,
+			Package:    dir,
+			Symbol:     "TargetFunc",
+			File:       filepath.Join(dir, "pkga/a.go"),
+			TargetFile: filepath.Join(dir, "pkgb/b.go"),
+		})
+		if err == nil {
+			t.Fatal("expected error for cross-package move")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "cross-package") {
+			t.Errorf("expected 'cross-package' in error, got: %v", err)
+		}
+		if !strings.Contains(msg, "move_symbol") || !strings.Contains(msg, "move_file") {
+			t.Errorf("multi-symbol file should name both move_symbol and move_file in the two-step pattern; got: %v", err)
 		}
 	})
 

@@ -31,23 +31,30 @@ import (
 // definitions. AutoVerify additionally runs lint and optionally tests
 // as diagnostic signals — see [runRefactorAction].
 //
+// Prefer this over fs.move (filesystem-only — leaves the workspace
+// with a stale `package` clause and dozens of broken imports the
+// agent then has to chase down) AND over [MoveSymbol] for any
+// cross-package move: [MoveSymbol] refuses cross-package operations
+// outright. When the source file already contains exactly the
+// symbol(s) destined for the new package, MoveFile is the equivalent
+// operation done correctly — every importer is rewritten in one
+// atomic pass. When the source file contains other symbols you want
+// to keep in place, the established pattern is two calls: [MoveSymbol]
+// first (extract the target symbol into its own file inside the source
+// package), then MoveFile (relocate that new file to the destination
+// package).
+//
 // What is NOT supported: moving multiple files at once (use
 // [MovePackage] when an entire package moves), and moving a single
 // file out of a package whose remaining files transitively depend on
 // the moved declarations — those would form an import cycle and the
-// build gate will reject the move. For symbol-level reshuffles within
-// the same package use [MoveSymbol].
-//
-// Prefer this over fs.move for any Go file move. fs.move is
-// filesystem-only and leaves the workspace with a stale `package`
-// clause and dozens of broken imports across the project, all of which
-// the agent then has to chase down manually.
+// build gate will reject the move.
 //
 // The input mirrors [lang.MoveFileInput]; the output is the shared
 // [refactor.Output] surfaced by every refactor tool.
 var MoveFile = tool.New[lang.MoveFileInput, refactor.Output](
 	"lang.go.move_file",
-	"PREFER OVER fs.move when moving a Go source file to a different package. One call updates the package clause, rewrites importers (srcpkg.X → dstpkg.X), qualifies references between siblings, and runs goimports — atomic with build-gate rollback. fs.move is filesystem-only and leaves Go imports broken.",
+	"PREFER OVER fs.move (filesystem-only, leaves imports broken) AND OVER lang.go.move_symbol when moving across packages (move_symbol refuses cross-package). One call rewrites every importer (srcpkg.X → dstpkg.X), updates the package clause, qualifies references to siblings left behind, and runs goimports — atomic with build-gate rollback. For a cross-package single-symbol move where the source file contains other symbols you want to leave in place, extract via move_symbol first then call move_file.",
 	func(ctx context.Context, in lang.MoveFileInput) (refactor.Output, error) {
 		return runRefactorAction(ctx, refactor.Input{
 			Action:       refactor.ActionMoveFile,

@@ -127,10 +127,88 @@ func msPlanMove(pkgs []*packages.Package, modRoot, fileHint, symbol, targetFile 
 	}
 
 	if filepath.Clean(filepath.Dir(sourceFile)) != filepath.Clean(filepath.Dir(targetPath)) {
-		return msMovePlan{}, fmt.Errorf("cross-package move not supported yet — use move_package for entire packages")
+		return msMovePlan{}, msCrossPackageError(sourceFile, symbol, targetFile)
 	}
 
 	return msMovePlan{sourceFile: sourceFile, targetFile: targetPath}, nil
+}
+
+// msCrossPackageError builds the actionable error returned when a
+// move_symbol call is asked to move a declaration into a directory
+// that belongs to a different Go package.
+//
+// move_symbol does not rewrite importers, so cross-package moves are
+// out of scope for this tool — but the agent's correct next call
+// depends on what the source file looks like:
+//
+//   - If the source file's only top-level declarations are the symbol
+//     being moved (and, when the symbol is a type, its receiver
+//     methods), the equivalent operation IS move_file: relocate the
+//     whole file to the destination package and let move_file's
+//     importer-rewrite pass keep the build green.
+//
+//   - Otherwise the source file contains other symbols the caller
+//     presumably wants left in place, so the established pattern is
+//     two calls: move_symbol first (extract the symbol into a new
+//     file inside the source package), then move_file to relocate
+//     that new file to the destination.
+//
+// We detect the single-symbol case by re-running msFindDeclsToMove on
+// a parse of the source file and comparing the returned decls against
+// the file's full Decls slice. When parsing fails or the symbol is
+// not found we fall through to the multi-symbol message — it's the
+// strictly safer recommendation.
+func msCrossPackageError(sourceFile, symbol, targetFileHint string) error {
+	if msSourceFileIsSingleSymbol(sourceFile, symbol) {
+		return fmt.Errorf(
+			"cross-package move not supported by move_symbol; the source file %q contains only %q, "+
+				"so lang.go.move_file is the equivalent operation — point its target_file at %q and it will "+
+				"relocate the file AND rewrite every importer (srcpkg.X → dstpkg.X) atomically",
+			filepath.Base(sourceFile), symbol, targetFileHint,
+		)
+	}
+	return fmt.Errorf(
+		"cross-package move not supported by move_symbol; the source file %q contains other declarations beyond %q. "+
+			"Two-step pattern: (1) call move_symbol to extract %q into its own file inside %q, "+
+			"then (2) call move_file to relocate that new file into the destination package. "+
+			"For moving an entire package use lang.go.move_package instead.",
+		filepath.Base(sourceFile), symbol, symbol, filepath.Dir(sourceFile),
+	)
+}
+
+// msSourceFileIsSingleSymbol reports whether the only top-level
+// declarations in sourceFile are those msFindDeclsToMove would extract
+// for symbol — i.e. the symbol itself plus, when symbol names a type,
+// every method declared on that type within this same file. When true,
+// a cross-package move_symbol is functionally identical to a move_file
+// invocation, so the error path can recommend move_file precisely
+// instead of suggesting both alternatives and leaving the agent to
+// guess. Parse / I/O failures conservatively return false so the
+// caller falls back to the safer multi-symbol message.
+func msSourceFileIsSingleSymbol(sourceFile, symbol string) bool {
+	srcBytes, err := os.ReadFile(sourceFile)
+	if err != nil {
+		return false
+	}
+	fset := token.NewFileSet()
+	srcAST, err := parser.ParseFile(fset, sourceFile, srcBytes, parser.ParseComments)
+	if err != nil {
+		return false
+	}
+	target := msFindDeclsToMove(srcAST, symbol)
+	if len(target) == 0 {
+		return false
+	}
+	inTarget := make(map[ast.Decl]bool, len(target))
+	for _, d := range target {
+		inTarget[d] = true
+	}
+	for _, d := range srcAST.Decls {
+		if !inTarget[d] {
+			return false
+		}
+	}
+	return true
 }
 
 // msSourceState holds the working state of the source file as we extract one
