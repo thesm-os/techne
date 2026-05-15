@@ -88,7 +88,26 @@ func (*RenameAction) Execute(ctx context.Context, input Input, ws Transaction) e
 
 	targetObj := FindSymbolObject(pkgs, input.Symbol, input.File, input.Line)
 	if targetObj == nil {
-		return fmt.Errorf("symbol %q not found", input.Symbol)
+		// Two distinct failure modes deserve distinct nudges. The
+		// no-position case is the common one for agents trying to
+		// rename a local/parameter without realising file+line is the
+		// disambiguation handle; the with-position case is usually
+		// "you pointed at a use site, not the def".
+		if input.File == "" || input.Line == 0 {
+			return fmt.Errorf(
+				"symbol %q not found in package-scope. For a local variable or function/method parameter, "+
+					"supply file + line of the *defining* identifier (the var/const declaration line, the := "+
+					"line, or the FuncDecl signature line for a parameter) — that disambiguates the right "+
+					"types.Object among many same-named candidates",
+				input.Symbol,
+			)
+		}
+		return fmt.Errorf(
+			"symbol %q not found at %s:%d — the line must point at the *defining* identifier, not a use site. "+
+				"Confirm the line is the var/const declaration, the := assignment, or the FuncDecl signature "+
+				"whose parameter list contains the name",
+			input.Symbol, input.File, input.Line,
+		)
 	}
 
 	// targetDefFile and targetDefOffset are the canonical file+offset of the

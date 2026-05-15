@@ -345,7 +345,137 @@ func Compute(x int) int {
 		verifyModuleIntegrity(t, dir)
 	})
 
-	t.Run("symbol not found returns error", func(t *testing.T) {
+	// Probe: rename a parameter of a free function. Distinct from the
+	// existing "local variable with file+line disambiguation" test
+	// because parameters are declared in the FuncDecl's signature, not
+	// the body — exercises whether FindSymbolObject finds the
+	// types.Var for a *ast.Field name.
+	t.Run("free function parameter via file+line", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "fn/fn.go", `package fn
+
+func Add(amount int) int {
+	return amount + 1
+}
+`)
+		filePath := filepath.Join(dir, "fn/fn.go")
+		out := runRefactor(t, dir, Input{
+			Action:  ActionRename,
+			Symbol:  "amount",
+			NewName: "delta",
+			File:    filePath,
+			Line:    3,
+		})
+		if out.Status != StatusSuccess {
+			t.Fatalf("expected success, got %s: %+v", out.Status, out.Results)
+		}
+		got, _ := os.ReadFile(filePath)
+		if strings.Contains(string(got), "amount") {
+			t.Errorf("old param name still present: %s", got)
+		}
+		if !strings.Contains(string(got), "func Add(delta int)") || !strings.Contains(string(got), "delta + 1") {
+			t.Errorf("param and body not both rewritten: %s", got)
+		}
+		verifyModuleIntegrity(t, dir)
+	})
+
+	// Probe: rename a parameter of a method (receiver present).
+	// Adds the receiver dimension on top of the free-function case —
+	// exercises whether FindSymbolObject's position-based lookup is
+	// confused by the receiver field, which is structurally similar
+	// to a parameter in the AST.
+	t.Run("method parameter via file+line", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "m/m.go", `package m
+
+type Counter struct{ n int }
+
+func (c *Counter) Add(amount int) int {
+	c.n += amount
+	return c.n
+}
+`)
+		filePath := filepath.Join(dir, "m/m.go")
+		out := runRefactor(t, dir, Input{
+			Action:  ActionRename,
+			Symbol:  "amount",
+			NewName: "delta",
+			File:    filePath,
+			Line:    5,
+		})
+		if out.Status != StatusSuccess {
+			t.Fatalf("expected success, got %s: %+v", out.Status, out.Results)
+		}
+		got, _ := os.ReadFile(filePath)
+		if strings.Contains(string(got), "amount") {
+			t.Errorf("old param name still present: %s", got)
+		}
+		if !strings.Contains(string(got), "Add(delta int)") || !strings.Contains(string(got), "+= delta") {
+			t.Errorf("method param + body not both rewritten: %s", got)
+		}
+		verifyModuleIntegrity(t, dir)
+	})
+
+	// Probe: rename a parameter whose name shadows an imported
+	// package — the exact case the user hit with `kind kind.Kind`.
+	// Critical correctness check: the parameter `kind` and the
+	// package selector `kind.Kind` (in the type expression on the
+	// same line) are different types.Object identities, so the
+	// rename MUST rewrite only the param's def + body uses and
+	// leave the package selector untouched. Also verify the
+	// package reference outside the function (`var Default =
+	// kind.Zero`) is untouched.
+	t.Run("parameter shadowing imported package", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "kind/kind.go", `package kind
+
+type Kind int
+
+const Zero Kind = 0
+`)
+		writeTestFile(t, dir, "consumer/consumer.go", `package consumer
+
+import "testmod.example.com/kind"
+
+var Default = kind.Zero
+
+func Process(kind kind.Kind) bool {
+	return kind == 0
+}
+`)
+		filePath := filepath.Join(dir, "consumer/consumer.go")
+		out := runRefactor(t, dir, Input{
+			Action:  ActionRename,
+			Symbol:  "kind",
+			NewName: "k",
+			File:    filePath,
+			Line:    7, // the func Process(kind kind.Kind) line
+		})
+		if out.Status != StatusSuccess {
+			t.Fatalf("expected success, got %s: %+v", out.Status, out.Results)
+		}
+		got, _ := os.ReadFile(filePath)
+		gs := string(got)
+		// Param signature: name → k, type expression untouched.
+		if !strings.Contains(gs, "func Process(k kind.Kind)") {
+			t.Errorf("expected `func Process(k kind.Kind)`; got: %s", gs)
+		}
+		// Body use of the param: rewritten.
+		if !strings.Contains(gs, "return k == 0") {
+			t.Errorf("expected `return k == 0`; got: %s", gs)
+		}
+		// Package reference outside the function: untouched.
+		if !strings.Contains(gs, "var Default = kind.Zero") {
+			t.Errorf("expected `var Default = kind.Zero` untouched; got: %s", gs)
+		}
+		// Import line: untouched.
+		if !strings.Contains(gs, `import "testmod.example.com/kind"`) {
+			t.Errorf("import line should be untouched; got: %s", gs)
+		}
+		verifyModuleIntegrity(t, dir)
+	})
+
+	t.Run("symbol not found (no file+line) nudges toward file+line", func(t *testing.T) {
 		dir := setupTestModule(t)
 		writeTestFile(t, dir, "pkg.go", "package main\n\nfunc main() {}\n")
 
@@ -357,6 +487,43 @@ func Compute(x int) int {
 		})
 		if err == nil {
 			t.Fatal("expected error for missing symbol, got nil")
+		}
+		// The error must include enough of the local/parameter hint to
+		// route the agent toward providing file+line on the retry. We
+		// check for the key phrasing — not the full sentence — so a
+		// future wording tweak doesn't have to update this test.
+		msg := err.Error()
+		if !strings.Contains(msg, "file + line") || !strings.Contains(msg, "defining") {
+			t.Errorf("error should nudge toward file+line of the defining identifier; got: %v", err)
+		}
+	})
+
+	t.Run("symbol not found (with file+line miss) hints at use-vs-def", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "fn/fn.go", `package fn
+
+func Use() int {
+	x := 1
+	return x + 1
+}
+`)
+		filePath := filepath.Join(dir, "fn/fn.go")
+		// Point Line at line 5 (the `return x + 1` *use*, not the def
+		// on line 4). The resolver should miss because phase 2 scans
+		// Defs only — and the error should explain why.
+		_, err := Handle(t.Context(), Input{
+			Action:  ActionRename,
+			Symbol:  "x",
+			NewName: "y",
+			File:    filePath,
+			Line:    5,
+		})
+		if err == nil {
+			t.Fatal("expected error when File+Line points at a use site, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "defining") || !strings.Contains(msg, "use site") {
+			t.Errorf("error should explain that the line must be the definition, not a use; got: %v", err)
 		}
 	})
 

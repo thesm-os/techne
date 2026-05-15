@@ -86,8 +86,12 @@ type RenameInput struct {
 	// Symbol identifies the declaration to rename. Use the bare name for
 	// package-level functions, types, vars, and consts (`NewUser`); use
 	// `Receiver.Method` for methods (`Engine.Run`). For local variables
-	// supply the bare name and disambiguate with File/Line.
-	Symbol string `json:"symbol" jsonschema:"Symbol to rename. Example: 'NewUser' or 'Engine.Run'."`
+	// and function/method parameters use the bare name and disambiguate
+	// with File + Line pointing at the defining identifier; this also
+	// covers parameters whose name shadows an imported package
+	// (`func F(kind kind.Kind)` — rename param `kind` without touching
+	// `kind.Kind`).
+	Symbol string `json:"symbol" jsonschema:"Identifier to rename. Top-level: 'NewUser' or 'Engine.Run'. Local var or function/method parameter: the bare name (e.g. 'kind') paired with file+line at the defining identifier — shadowed parameters work too."`
 	// NewName is the replacement identifier. Must satisfy Go's identifier
 	// grammar and must not collide with an existing identifier in the
 	// same scope — gopls will refuse the rename and roll back. Exported/
@@ -100,16 +104,19 @@ type RenameInput struct {
 	// field only resolves the symbol when its name is overloaded across
 	// packages.
 	Package string `json:"package,omitempty" jsonschema:"Target package import path or relative path. Defaults to the current directory."`
-	// File pins the declaration to a specific source file. Combine with
-	// Line when renaming a local variable that shadows a same-named one
-	// elsewhere in the package, or when multiple declarations share the
-	// bare name. Path is resolved relative to the module root.
-	File string `json:"file,omitempty" jsonschema:"File path containing the symbol when needed to disambiguate local variables."`
-	// Line is the 1-based line number of the declaration when File alone
-	// is insufficient to disambiguate (e.g. multiple shadowed locals in
-	// the same function). Zero means "use the first matching declaration
-	// in File".
-	Line int `json:"line,omitempty" jsonschema:"1-based line number when needed to disambiguate local variables."`
+	// File pins the declaration to a specific source file. Required (with
+	// Line) for renaming locals and function/method parameters — the
+	// resolver scans TypesInfo.Defs at the (file, line) position to pick
+	// the right scoped types.Object out of many same-named candidates
+	// across the workspace. Path is resolved relative to the module root.
+	File string `json:"file,omitempty" jsonschema:"Path of the file containing the defining identifier. REQUIRED for local var / parameter renames (pair with line); for top-level symbols use 'package' instead."`
+	// Line is the 1-based line number of the defining identifier — the
+	// line of the var/const declaration, the `:=`, the FuncDecl whose
+	// signature contains the parameter, or the receiver type when
+	// renaming a receiver name. Required for locals/parameters; not
+	// needed for top-level symbols. Zero means "use the first matching
+	// declaration in File".
+	Line int `json:"line,omitempty" jsonschema:"1-based line number of the defining identifier (var/:= line, FuncDecl signature line for a parameter, etc.). REQUIRED for local var / parameter renames; ignored for top-level symbols."`
 	// DryRun computes the full rename and returns the would-be diff
 	// without writing to disk. Useful for previewing impact on a
 	// wide-blast-radius identifier before committing. The build gate does
