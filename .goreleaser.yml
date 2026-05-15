@@ -134,6 +134,32 @@ homebrew_casks:
       - techne
     homepage: "https://github.com/thesm-os/techne"
     description: "Task runner for Go projects: bootstrap, format, lint, test, bench, release, and a multi-stage check umbrella."
+    # Run `techne completion <shell>` at install time and install the
+    # output into Homebrew's shell-completion dirs. `shell_parameter_format: cobra`
+    # tells goreleaser to pass the shell name as a positional arg,
+    # matching cobra's `completion bash|zsh|fish|powershell` form.
+    generate_completions_from_executable:
+      args:
+        - completion
+      shell_parameter_format: cobra
+      shells:
+        - bash
+        - zsh
+        - fish
+        - pwsh
+    # Without this hook, `brew install --cask` leaves
+    # `com.apple.quarantine` on the binary; Gatekeeper then SIGKILLs
+    # the ad-hoc-signed Mach-O at exec on Apple Silicon. (Cask's
+    # auto-quarantine-removal only fires for `app`/`pkg` artifact
+    # types, not `binary`.) Stripping it in post-install is the
+    # documented workaround until we ship Developer-ID-signed +
+    # notarized binaries.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/techne"]
+          end
     # Tap repo lives at github.com/thesm-os/homebrew-tap.
     # Cross-repo writes need a PAT with contents:write on the tap;
     # the release workflow exposes it as $HOMEBREW_TAP_TOKEN.
