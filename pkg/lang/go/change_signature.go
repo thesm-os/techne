@@ -45,19 +45,20 @@ import (
 // shared [refactor.Output] surfaced by every refactor tool.
 var ChangeSignature = tool.New[lang.ChangeSignatureInput, refactor.Output](
 	"lang.go.change_signature",
-	"PREFER OVER manual Edit when changing a Go function signature. One call adds/removes parameters and return values AND rewrites every call site with the supplied default values. Edit alone changes the signature and immediately breaks every caller; this tool keeps the build green. No generic alternative — gopls cannot do cross-file signature changes.",
+	"PREFER OVER manual Edit when changing a Go function signature. One call adds parameters and return values, removes parameters by name, and removes return values by type — AND rewrites every call site with the supplied default values for the params it touches. Edit alone changes the signature and immediately breaks every caller; this tool keeps the build green for parameter changes. Return changes are signature-only — body returns and call-site bindings stay the agent's follow-up. No generic alternative — gopls cannot do cross-file signature changes.",
 	func(ctx context.Context, in lang.ChangeSignatureInput) (refactor.Output, error) {
 		return runRefactorAction(ctx, refactor.Input{
-			Action:       refactor.ActionChangeSignature,
-			Symbol:       in.Symbol,
-			AddParams:    convertAddParams(in.AddParams),
-			AddReturns:   convertAddReturns(in.AddReturns),
-			RemoveParams: in.RemoveParams,
-			Package:      in.Package,
-			DryRun:       in.DryRun,
-			AutoVerify:   in.AutoVerify,
-			VerifySuites: in.VerifySuites,
-			Detail:       in.Detail,
+			Action:        refactor.ActionChangeSignature,
+			Symbol:        in.Symbol,
+			AddParams:     convertAddParams(in.AddParams),
+			AddReturns:    convertAddReturns(in.AddReturns),
+			RemoveParams:  in.RemoveParams,
+			RemoveReturns: in.RemoveReturns,
+			Package:       in.Package,
+			DryRun:        in.DryRun,
+			AutoVerify:    in.AutoVerify,
+			VerifySuites:  in.VerifySuites,
+			Detail:        in.Detail,
 		})
 	},
 	tool.WithShortDescription("Change a Go function signature and update every call site project-wide"),

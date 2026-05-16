@@ -133,6 +133,90 @@ func doWork() {
 		verifyModuleIntegrity(t, dir)
 	})
 
+	// Sibling of "remove parameter": drop a return type from the
+	// signature. Mirrors the AddReturns scope contract — signature
+	// only, body returns left to a follow-up edit by the agent.
+	t.Run("remove return — definition updated, error type dropped", func(t *testing.T) {
+		dir := setupTestModule(t)
+		// `panic()` is the noreturn idiom used elsewhere in this file
+		// so the test fixture compiles after the signature change
+		// without needing the agent to also rewrite body returns.
+		writeTestFile(t, dir, "math/math.go", `package math
+
+func Halve(x int) (int, error) {
+	panic("not implemented")
+}
+`)
+		out := runRefactor(t, dir, Input{
+			Action:        ActionChangeSignature,
+			Symbol:        "Halve",
+			RemoveReturns: []string{"error"},
+		})
+		if out.Status != StatusSuccess {
+			t.Fatalf("expected success, got %s: %+v", out.Status, out.Results)
+		}
+		defContent, _ := os.ReadFile(filepath.Join(dir, "math/math.go"))
+		s := string(defContent)
+		if strings.Contains(s, "error") {
+			t.Errorf("error return should be dropped; got:\n%s", s)
+		}
+		if !strings.Contains(s, "func Halve(x int) int") {
+			t.Errorf("expected `func Halve(x int) int`; got:\n%s", s)
+		}
+		verifyModuleIntegrity(t, dir)
+	})
+
+	// Multiple returns of the same type — left-to-right consumption.
+	t.Run("remove return — duplicate types consumed left-to-right", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "tup/tup.go", `package tup
+
+func Triple(x int) (int, int, int) {
+	panic("not implemented")
+}
+`)
+		// Two "int" entries should remove the first two ints, leaving one.
+		out := runRefactor(t, dir, Input{
+			Action:        ActionChangeSignature,
+			Symbol:        "Triple",
+			RemoveReturns: []string{"int", "int"},
+		})
+		if out.Status != StatusSuccess {
+			t.Fatalf("expected success, got %s: %+v", out.Status, out.Results)
+		}
+		defContent, _ := os.ReadFile(filepath.Join(dir, "tup/tup.go"))
+		s := string(defContent)
+		if !strings.Contains(s, "func Triple(x int) int") {
+			t.Errorf("expected single-int return; got:\n%s", s)
+		}
+		verifyModuleIntegrity(t, dir)
+	})
+
+	// Non-matching remove_returns entry must error rather than silently
+	// no-op — silent no-ops led to agent confusion in B2's
+	// inline_constant scenario, and we want loud failures here too.
+	t.Run("remove return — unmatched type returns error", func(t *testing.T) {
+		dir := setupTestModule(t)
+		writeTestFile(t, dir, "nm/nm.go", `package nm
+
+func Plain(x int) int {
+	return x
+}
+`)
+		_, err := Handle(t.Context(), Input{
+			Action:        ActionChangeSignature,
+			Package:       dir,
+			Symbol:        "Plain",
+			RemoveReturns: []string{"error"},
+		})
+		if err == nil {
+			t.Fatal("expected error for unmatched remove_returns entry; got nil")
+		}
+		if !strings.Contains(err.Error(), "remove_returns") {
+			t.Errorf("error should name remove_returns; got: %v", err)
+		}
+	})
+
 	t.Run("multiple callers across packages all updated", func(t *testing.T) {
 		dir := setupTestModule(t)
 		writeTestFile(t, dir, "core/core.go", `package core

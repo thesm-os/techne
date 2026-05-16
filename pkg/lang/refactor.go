@@ -157,7 +157,8 @@ type RenameInput struct {
 //
 // The additions are positional: AddParams appends to the parameter
 // list, AddReturns appends to the return tuple, RemoveParams removes
-// by name (in the original signature). The tool refuses to apply a
+// by name, RemoveReturns removes by return-type text (left-to-right
+// match against the original signature). The tool refuses to apply a
 // change that would silently demote a public symbol to package-private
 // or break an interface satisfaction relationship — the build gate
 // catches these and rolls back.
@@ -184,6 +185,19 @@ type ChangeSignatureInput struct {
 	// lose that expression's side effects, so the agent should review
 	// call sites carefully or run with AutoVerify=true.
 	RemoveParams []string `json:"remove_params,omitempty" jsonschema:"Parameter names to remove from the definition; matching arguments are dropped from every call site."`
+	// RemoveReturns lists return values to drop from the signature,
+	// matched by return-type text against the original declaration in
+	// left-to-right order. Each entry consumes the first remaining
+	// return whose type-text matches; pass duplicates (e.g.
+	// `["int", "int"]`) to remove multiple results of the same type.
+	//
+	// Only the signature is rewritten — `return` statements in the
+	// function body and call-site assignment bindings are NOT updated.
+	// The build gate will reject the change until the agent strips the
+	// removed return from those sites in a follow-up edit (typically
+	// via lang.go.patch). This mirrors AddReturns, which is also a
+	// signature-only operation.
+	RemoveReturns []string `json:"remove_returns,omitempty" jsonschema:"Return-type names to drop from the definition, matched left-to-right against the original signature. Example: ['error'] strips an error return; ['int', 'int'] strips two int returns. Signature-only — body returns and call-site assignments are NOT auto-rewritten; the build gate will fail until they are fixed in a follow-up edit."`
 	// Package scopes the lookup for Symbol's declaration. Accepts an
 	// import path or workspace-relative directory; defaults to the current
 	// working directory. Call-site rewrites span the whole workspace

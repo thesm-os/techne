@@ -131,6 +131,10 @@ type Input struct {
 	// RemoveParams names parameters to drop during change_signature. Matching
 	// arguments are stripped from every call site.
 	RemoveParams []string `json:"remove_params,omitempty" jsonschema:"For change_signature: parameter names to remove from the definition. Corresponding arguments are also removed from ALL call sites."`
+	// RemoveReturns names return types to drop during change_signature,
+	// matched left-to-right against the original signature. Signature-only:
+	// body returns and call-site assignments are NOT auto-rewritten.
+	RemoveReturns []string `json:"remove_returns,omitempty" jsonschema:"For change_signature: return-type names to drop from the definition, matched left-to-right. Example: ['error']. Signature-only — body returns and call-site bindings are NOT auto-rewritten; the build gate will fail until those are fixed in a follow-up edit."`
 
 	// implement_interface
 	TargetStruct string `json:"target_struct,omitempty" jsonschema:"For implement_interface: struct to add method stubs to. Example: 'PostgresStore'. AGENT HINT: Use lang.go.search to find the struct first."`

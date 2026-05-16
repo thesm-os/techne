@@ -119,6 +119,7 @@ func (*ChangeSignatureAction) Execute(ctx context.Context, input Input, ws Trans
 		input.AddParams,
 		input.AddReturns,
 		input.RemoveParams,
+		input.RemoveReturns,
 	)
 	if err != nil {
 		return fmt.Errorf("modify signature: %w", err)
@@ -325,6 +326,7 @@ func modifyFuncSignature(
 	addParams []AddParameter,
 	addReturns []AddReturn,
 	removeParams []string,
+	removeReturns []string,
 ) ([]byte, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filePath, src, parser.ParseComments)
@@ -391,19 +393,52 @@ func modifyFuncSignature(
 		newParams = append(newParams, variadicParam)
 	}
 
-	// Build new return list (keeping existing, appending new ones).
+	// Build new return list. Existing returns are kept unless their
+	// type-text matches an entry in removeReturns (left-to-right
+	// consumption — duplicates in the input remove duplicates from the
+	// signature in order). Newly added returns are appended last.
+	//
+	// Only the SIGNATURE is rewritten here. The function body's `return`
+	// statements and every call-site assignment binding are NOT touched
+	// — agents fix those in a follow-up edit, same contract as
+	// AddReturns. The build gate rolls back if those follow-ups are
+	// missing.
+	removeReturnsRemaining := make([]string, len(removeReturns))
+	copy(removeReturnsRemaining, removeReturns)
+	consumeRemoval := func(typeStr string) bool {
+		for i, want := range removeReturnsRemaining {
+			if want == typeStr {
+				removeReturnsRemaining = append(removeReturnsRemaining[:i], removeReturnsRemaining[i+1:]...)
+				return true
+			}
+		}
+		return false
+	}
+
 	var newReturns []string
 	if targetFn.Type.Results != nil {
 		for _, field := range targetFn.Type.Results.List {
 			typeStr := ExprText(fset, src, field.Type)
 			if len(field.Names) > 0 {
 				for _, name := range field.Names {
+					if consumeRemoval(typeStr) {
+						continue
+					}
 					newReturns = append(newReturns, name.Name+" "+typeStr)
 				}
-			} else {
-				newReturns = append(newReturns, typeStr)
+				continue
 			}
+			if consumeRemoval(typeStr) {
+				continue
+			}
+			newReturns = append(newReturns, typeStr)
 		}
+	}
+	if len(removeReturnsRemaining) > 0 {
+		return nil, fmt.Errorf(
+			"remove_returns: %d entry/entries did not match any return type in %s — leftover %v",
+			len(removeReturnsRemaining), filePath, removeReturnsRemaining,
+		)
 	}
 	for _, r := range addReturns {
 		newReturns = append(newReturns, r.Type)
