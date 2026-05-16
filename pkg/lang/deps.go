@@ -46,6 +46,21 @@ type CallersInput struct {
 	// genuinely tracing a stdlib or third-party caller — e.g. proving that
 	// the standard library actually invokes a callback you registered.
 	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include callers from external packages and the standard library. Default: false (workspace-local only)."`
+	// Kind narrows the result set to one of three categories:
+	//
+	//   - [CallersKindCall] (default): direct call sites — `f(args)`
+	//     or `recv.Method(args)`. The pre-existing behaviour.
+	//   - [CallersKindValue]: value-use sites — `cb := f`, `g(f)`,
+	//     `return f`. Places where f is treated as a function value
+	//     but not called at that location. Use when auditing
+	//     callback hand-off chains or hunting for escapes.
+	//   - [CallersKindAll]: union of the two, distinguished by each
+	//     result's Kind field ([RelDirectCaller] vs [RelValueUse]).
+	//
+	// The three-way split exists because a signature change touches
+	// direct calls one way and value-uses another, and lumping them
+	// together (as plain `references` does) buries the distinction.
+	Kind string `json:"kind,omitempty" jsonschema:"Result filter: 'call' (default, direct f(args) call sites), 'value' (f used as a value — assigned, passed, returned — but not called at that site), 'all' (both, each entry's kind distinguishes them). Use 'value' to audit callback hand-offs; 'all' before a signature change to see every site that may need updating."`
 	// Limit caps the number of caller sites returned. Defaults to 50 when
 	// zero. A small cap keeps the response within an LLM's effective
 	// context; if the response sets Truncated=true the agent should narrow

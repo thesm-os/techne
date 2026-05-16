@@ -92,6 +92,133 @@ func TestDeps(t *testing.T) {
 		}
 	})
 
+	// ---- Callers Kind enum (F9) ----
+	//
+	// Three sites for a function `Hook`:
+	//   1. Direct call:  `Hook(42)` in Direct().
+	//   2. Value-grab assignment:  `cb := Hook` in Capture().
+	//   3. Value-pass arg:  `register(Hook)` in Register().
+	// The default Kind="call" surfaces only #1; Kind="value" surfaces
+	// #2 and #3; Kind="all" surfaces all three with distinct Kind tags
+	// (RelDirectCaller for #1, RelValueUse for #2 and #3).
+	t.Run("Callers/KindCallReturnsOnlyDirectCalls", func(t *testing.T) {
+		dir := writeMod(t, "callkindcall", map[string]string{
+			"a.go": "package callkindcall\n\n" +
+				"func Hook(int) {}\n\n" +
+				"func register(func(int)) {}\n\n" +
+				"func Direct()  { Hook(42) }\n" +
+				"func Capture() { cb := Hook; cb(1) }\n" +
+				"func Register() { register(Hook) }\n",
+		})
+		t.Chdir(dir)
+
+		out := executeDeps(t, golang.Callers, lang.CallersInput{
+			Symbol: "Hook",
+			Kind:   lang.CallersKindCall,
+		})
+
+		hasDirect, hasValue := false, false
+		for _, r := range out.Results {
+			if r.Kind == lang.RelDirectCaller {
+				hasDirect = true
+			}
+			if r.Kind == lang.RelValueUse {
+				hasValue = true
+			}
+		}
+		if !hasDirect {
+			t.Errorf("Kind=call must include the direct Hook(42) site; got %+v", out.Results)
+		}
+		if hasValue {
+			t.Errorf("Kind=call must NOT include value-use sites; got %+v", out.Results)
+		}
+	})
+
+	t.Run("Callers/KindValueReturnsOnlyValueUses", func(t *testing.T) {
+		dir := writeMod(t, "callkindvalue", map[string]string{
+			"a.go": "package callkindvalue\n\n" +
+				"func Hook(int) {}\n\n" +
+				"func register(func(int)) {}\n\n" +
+				"func Direct()  { Hook(42) }\n" +
+				"func Capture() { cb := Hook; cb(1) }\n" +
+				"func Register() { register(Hook) }\n",
+		})
+		t.Chdir(dir)
+
+		out := executeDeps(t, golang.Callers, lang.CallersInput{
+			Symbol: "Hook",
+			Kind:   lang.CallersKindValue,
+		})
+
+		if len(out.Results) == 0 {
+			t.Fatal("Kind=value should find value-use sites; got 0 results")
+		}
+		for _, r := range out.Results {
+			if r.Kind != lang.RelValueUse {
+				t.Errorf("Kind=value must only return RelValueUse entries; got %q at %s", r.Kind, r.Location)
+			}
+			// The Direct() function's Hook(42) is a direct call — the
+			// `Hook` ident there must NOT be in the value-use set.
+			if r.CallerSymbol == "Direct" {
+				t.Errorf("Direct() contains a direct call, not a value-use; got %+v", r)
+			}
+		}
+	})
+
+	t.Run("Callers/KindAllReturnsBothMerged", func(t *testing.T) {
+		dir := writeMod(t, "callkindall", map[string]string{
+			"a.go": "package callkindall\n\n" +
+				"func Hook(int) {}\n\n" +
+				"func register(func(int)) {}\n\n" +
+				"func Direct()  { Hook(42) }\n" +
+				"func Capture() { cb := Hook; cb(1) }\n" +
+				"func Register() { register(Hook) }\n",
+		})
+		t.Chdir(dir)
+
+		out := executeDeps(t, golang.Callers, lang.CallersInput{
+			Symbol: "Hook",
+			Kind:   lang.CallersKindAll,
+		})
+
+		hasDirect, hasValue := false, false
+		for _, r := range out.Results {
+			if r.Kind == lang.RelDirectCaller {
+				hasDirect = true
+			}
+			if r.Kind == lang.RelValueUse {
+				hasValue = true
+			}
+		}
+		if !hasDirect || !hasValue {
+			t.Errorf(
+				"Kind=all must include both direct calls and value-uses; got hasDirect=%v hasValue=%v results=%+v",
+				hasDirect, hasValue, out.Results,
+			)
+		}
+	})
+
+	t.Run("Callers/DefaultKindIsCall", func(t *testing.T) {
+		dir := writeMod(t, "callkinddefault", map[string]string{
+			"a.go": "package callkinddefault\n\n" +
+				"func Hook(int) {}\n\n" +
+				"func register(func(int)) {}\n\n" +
+				"func Direct()  { Hook(42) }\n" +
+				"func Register() { register(Hook) }\n",
+		})
+		t.Chdir(dir)
+
+		out := executeDeps(t, golang.Callers, lang.CallersInput{
+			Symbol: "Hook",
+			// Kind unspecified — must behave as "call".
+		})
+		for _, r := range out.Results {
+			if r.Kind == lang.RelValueUse {
+				t.Errorf("default Kind must not include value-uses; got %+v", r)
+			}
+		}
+	})
+
 	// ---- Implementations ----
 
 	t.Run("Implementations/FindsConcreteTypes", func(t *testing.T) {

@@ -47,12 +47,27 @@ import (
 // callers — useful when verifying that an external framework actually
 // invokes a callback the workspace registered with it.
 //
+// The Kind input narrows the result set:
+//
+//   - "call" (default): direct call sites — `f(args)` and
+//     `recv.Method(args)`. The original behaviour.
+//   - "value": value-use sites — `cb := f`, `g(f)`, `return f`. The
+//     function appears as a value at these positions, but isn't
+//     called there.
+//   - "all": both, with each result's Kind ([RelDirectCaller] or
+//     [RelValueUse]) telling them apart.
+//
+// The three-way split matters before a signature change: a direct
+// call breaks one way (wrong arg list), a value-use breaks another
+// (wrong type). Auditing both classes up front avoids the second
+// surprise.
+//
 // Results are capped at input.Limit (default 50) and trimmed to the
 // requested Detail level (summary/standard/full) so the agent can pick
 // the smallest payload that answers its question.
 var Callers = tool.New[lang.CallersInput, lang.DepsResult](
 	"lang.go.callers",
-	"PREFER OVER Grep for finding callers of a Go function. Returns type-checked call sites (Grep matches function-name strings and gives false positives from same-named identifiers in unrelated scopes). Each result includes the caller's location, surrounding docblock, and a one-line call snippet so you understand HOW the result is used. Workspace-local by default (traverses go.work modules); pass include_external=true to include stdlib and dependency callers.",
+	"PREFER OVER Grep for finding callers of a Go function. Returns type-checked call sites (Grep matches function-name strings and gives false positives from same-named identifiers in unrelated scopes). Each result includes the caller's location, surrounding docblock, and a one-line call snippet so you understand HOW the result is used. Workspace-local by default (traverses go.work modules); pass include_external=true to include stdlib and dependency callers. Set kind='value' to find sites where the function is used AS A VALUE (cb := f, g(f), return f) — distinct from direct calls; 'all' returns both with kind tags.",
 	func(ctx context.Context, in lang.CallersInput) (lang.DepsResult, error) {
 		return runDepsQueryWithDetail(
 			ctx,
@@ -62,10 +77,22 @@ var Callers = tool.New[lang.CallersInput, lang.DepsResult](
 			in.IncludeExternal,
 			in.Detail,
 			func(allPkgs map[string]*packages.Package, fset *token.FileSet) []lang.DepReference {
-				return findCallers(in.Symbol, allPkgs)
+				kind := in.Kind
+				if kind == "" {
+					kind = lang.CallersKindCall
+				}
+				var refs []lang.DepReference
+				if kind == lang.CallersKindCall || kind == lang.CallersKindAll {
+					refs = append(refs, findCallers(in.Symbol, allPkgs)...)
+				}
+				if kind == lang.CallersKindValue || kind == lang.CallersKindAll {
+					refs = append(refs, findValueUses(in.Symbol, allPkgs)...)
+				}
+				return refs
 			},
 		)
 	},
+	tool.Enum("kind", lang.CallersKindCall, lang.CallersKindValue, lang.CallersKindAll),
 	tool.WithShortDescription("Find type-checked callers of a Go function or method workspace-wide"),
 )
 
@@ -605,6 +632,103 @@ func findCallers(symbol string, allPkgs map[string]*packages.Package) []lang.Dep
 					Package:        p.PkgPath,
 					Location:       location,
 					Kind:           lang.RelDirectCaller,
+					CallSnippet:    strings.TrimSpace(callSnippet),
+					CallerSymbol:   callerSymbol,
+					CallerDocblock: callerDocblock,
+					Context:        context,
+				})
+				return true
+			})
+		}
+	}
+
+	return refs
+}
+
+// findValueUses walks every loaded AST and records each ast.Ident
+// whose Name matches symbol but which is NOT the call-target of an
+// enclosing CallExpr — i.e., sites where the function is passed as a
+// value (`g(f)`), assigned (`cb := f`), or returned (`return f`)
+// rather than called directly.
+//
+// Two-pass design per file: first collect every Pos() that occupies
+// a CallExpr.Fun position (both bare Ident and SelectorExpr.Sel
+// shapes); then revisit and emit matching Idents whose position is
+// not in that set. Defs entries (declarations of the symbol itself)
+// are skipped — callers want sites that USE the function, not the
+// function's own declaration.
+//
+// Same name-based matching contract as findCallers: identifiers with
+// the same name in unrelated scopes will surface. The caller's
+// location plus the [RelValueUse] kind tag make the disambiguation
+// obvious in practice; agents needing strict object identity can
+// drop to [lang.go.references] and filter by package.
+func findValueUses(symbol string, allPkgs map[string]*packages.Package) []lang.DepReference {
+	var refs []lang.DepReference
+
+	for _, p := range allPkgs {
+		if p.Fset == nil {
+			continue
+		}
+		for i, file := range p.Syntax {
+			filePath := ""
+			if i < len(p.CompiledGoFiles) {
+				filePath = p.CompiledGoFiles[i]
+			}
+
+			// Pass 1: mark every ident position that sits in the
+			// CallExpr.Fun slot, including selector-call shapes like
+			// `recv.Method(...)` where the Method ident is in
+			// SelectorExpr.Sel and the SelectorExpr itself is the Fun.
+			callPositions := make(map[token.Pos]bool)
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch fn := call.Fun.(type) {
+				case *ast.Ident:
+					callPositions[fn.Pos()] = true
+				case *ast.SelectorExpr:
+					callPositions[fn.Sel.Pos()] = true
+				}
+				return true
+			})
+
+			src, _ := os.ReadFile(filePath)
+
+			// Pass 2: collect every matching Ident that ISN'T in the
+			// call-target set and ISN'T a declaration site for the
+			// symbol itself.
+			ast.Inspect(file, func(n ast.Node) bool {
+				ident, ok := n.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if ident.Name != symbol {
+					return true
+				}
+				if callPositions[ident.Pos()] {
+					return true
+				}
+				if p.TypesInfo != nil {
+					if obj, isDef := p.TypesInfo.Defs[ident]; isDef && obj != nil && obj.Name() == symbol {
+						return true
+					}
+				}
+
+				pos := p.Fset.Position(ident.Pos())
+				location := fmt.Sprintf("%s:%d", pos.Filename, pos.Line)
+				callSnippet := extractLineFromBytes(src, pos.Line)
+				callerSymbol := findEnclosingFunc(file, ident.Pos())
+				callerDocblock := extractCallerDocblock(file, ident.Pos())
+				context := extractCallContext(file, ident, p.Fset, callerSymbol, src)
+
+				refs = append(refs, lang.DepReference{
+					Symbol:         symbol,
+					Package:        p.PkgPath,
+					Location:       location,
+					Kind:           lang.RelValueUse,
 					CallSnippet:    strings.TrimSpace(callSnippet),
 					CallerSymbol:   callerSymbol,
 					CallerDocblock: callerDocblock,

@@ -204,6 +204,33 @@ const (
 	// RelImplementor denotes a concrete type whose method set satisfies
 	// the target interface. Reported by [ImplementationsInput].
 	RelImplementor = "implementor"
+	// RelValueUse denotes a site where the target function or method is
+	// referenced as a value (assigned to a variable, passed as an
+	// argument, returned, etc.) rather than called directly. Reported
+	// by [CallersInput] when Kind is "value" or "all". Distinct from
+	// [RelDirectCaller] — a `cb := f` site has no f(args) shape, so a
+	// rename of f's signature wouldn't break it the same way a direct
+	// call would.
+	RelValueUse = "value_use"
+)
+
+// Caller-query kind values for [CallersInput.Kind].
+const (
+	// CallersKindCall returns only direct call sites — `f(args)`,
+	// `recv.Method(args)`. The default, and the behaviour the tool
+	// has had since inception.
+	CallersKindCall = "call"
+	// CallersKindValue returns only value-use sites — `cb := f`,
+	// `g(f)`, `return f`. Functions used as values but never called
+	// at the captured location. Useful when auditing a callback
+	// hand-off chain or hunting for places a function escapes its
+	// declaring package without being invoked.
+	CallersKindValue = "value"
+	// CallersKindAll returns both call sites and value-use sites
+	// merged into one ranked list. Each entry's Kind distinguishes
+	// the two: [RelDirectCaller] for calls, [RelValueUse] for value
+	// uses.
+	CallersKindAll = "all"
 )
 
 // Dependency include types for DepsInput.
