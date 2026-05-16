@@ -168,10 +168,10 @@ func msCrossPackageError(sourceFile, symbol, targetFileHint string) error {
 		)
 	}
 	return fmt.Errorf(
-		"cross-package move not supported by move_symbol; the source file %q contains other declarations beyond %q. "+
-			"Two-step pattern: (1) call move_symbol to extract %q into its own file inside %q, "+
+		"cross-package move not supported by move_symbol; the source file %q contains other declarations beyond %q "+
+			"— two-step pattern: (1) call move_symbol to extract %q into its own file inside %q, "+
 			"then (2) call move_file to relocate that new file into the destination package. "+
-			"For moving an entire package use lang.go.move_package instead.",
+			"For moving an entire package use lang.go.move_package instead",
 		filepath.Base(sourceFile), symbol, symbol, filepath.Dir(sourceFile),
 	)
 }

@@ -19,7 +19,7 @@ import (
 )
 
 // FindSymbolObject locates a types.Object by name across loaded packages,
-// optionally narrowed by file and line for local-variable disambiguation.
+// optionally narrowed by package, file, and line.
 // Returns nil when no match is found.
 //
 // Resolution proceeds in three phases, stopping at the first hit:
@@ -41,10 +41,17 @@ import (
 //     Multiple matches return nil — without a file+line hint, the result would
 //     be ambiguous.
 //
-// Not a stable result for symbols with the same name across packages: phase 1
-// returns the first package iterated, which depends on packages.Load ordering.
-// Callers wanting a specific package should pre-filter pkgs.
-func FindSymbolObject(pkgs []*packages.Package, symbol, file string, line int) types.Object {
+// pkgFilter restricts every phase's package iteration to packages whose
+// PkgPath equals the filter (matching the import path the caller passed
+// through Input.Package). When non-empty it is a strict filter: the
+// resolver never falls through to other packages. This is what stops a
+// "Default" const lookup in package priority from silently picking up a
+// "Default" function declared in directive/naming/builder when those
+// packages happen to be loaded too. An empty filter preserves the
+// original "search every loaded package" behavior, which is the right
+// default when the caller genuinely wants the workspace-wide unique
+// match (the agent didn't specify a package).
+func FindSymbolObject(pkgs []*packages.Package, symbol, pkgFilter, file string, line int) types.Object {
 	parts := strings.SplitN(symbol, ".", 2)
 	typeName := ""
 	funcName := parts[0]
@@ -53,8 +60,44 @@ func FindSymbolObject(pkgs []*packages.Package, symbol, file string, line int) t
 		funcName = parts[1]
 	}
 
+	// matches accepts a package iff either the filter is the empty /
+	// wildcard form (any package matches), or names this package
+	// exactly via its import path, or is a filesystem path covering
+	// this package's source directory. The directory branch lets
+	// callers pass either a specific package dir ("./pkg/lang/go") OR
+	// a workspace root ("/abs/module-root"), and have the latter still
+	// scope the lookup to the project — the right semantic for legacy
+	// callers that conflate Package with "the workspace I'm refactoring
+	// inside".
+	//
+	// Workspace-wildcard forms (`""`, `"."`, `"./..."`, `"..."`) match
+	// every package — they're how the Go toolchain spells "everything
+	// in the workspace", and the resolver should treat them the same
+	// as an unspecified filter rather than as strict path equality.
+	isWildcard := pkgFilter == "" || pkgFilter == "." || pkgFilter == "..." || pkgFilter == "./..."
+	matches := func(pkg *packages.Package) bool {
+		if isWildcard {
+			return true
+		}
+		if pkg.PkgPath == pkgFilter {
+			return true
+		}
+		if len(pkg.GoFiles) == 0 {
+			return false
+		}
+		pkgDir := filepath.Dir(pkg.GoFiles[0])
+		filtAbs, err := filepath.Abs(pkgFilter)
+		if err != nil {
+			return false
+		}
+		return pkgDir == filtAbs || strings.HasPrefix(pkgDir, filtAbs+string(filepath.Separator))
+	}
+
 	// 1. Package-scope lookup first.
 	for _, pkg := range pkgs {
+		if !matches(pkg) {
+			continue
+		}
 		if pkg.Types == nil || pkg.Types.Scope() == nil {
 			continue
 		}
@@ -100,6 +143,9 @@ func FindSymbolObject(pkgs []*packages.Package, symbol, file string, line int) t
 	// 2. If file and line are provided: scan TypesInfo.Defs for idents at that file:line.
 	if file != "" && line > 0 {
 		for _, pkg := range pkgs {
+			if !matches(pkg) {
+				continue
+			}
 			if pkg.TypesInfo == nil || pkg.Fset == nil {
 				continue
 			}
@@ -119,6 +165,9 @@ func FindSymbolObject(pkgs []*packages.Package, symbol, file string, line int) t
 	var localObj types.Object
 	var localMatches int
 	for _, pkg := range pkgs {
+		if !matches(pkg) {
+			continue
+		}
 		if pkg.TypesInfo == nil {
 			continue
 		}

@@ -74,7 +74,7 @@ func (*ExtractInterfaceAction) Execute(ctx context.Context, input Input, ws Tran
 		return fmt.Errorf("load packages: %w", err)
 	}
 
-	structObj := FindSymbolObject(pkgs, input.TargetStruct, "", 0)
+	structObj := FindSymbolObject(pkgs, input.TargetStruct, input.Package, "", 0)
 	if structObj == nil {
 		return fmt.Errorf("struct %q not found", input.TargetStruct)
 	}

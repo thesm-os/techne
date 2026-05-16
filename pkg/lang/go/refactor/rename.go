@@ -86,7 +86,7 @@ func (*RenameAction) Execute(ctx context.Context, input Input, ws Transaction) e
 		return fmt.Errorf("load packages: %w", err)
 	}
 
-	targetObj := FindSymbolObject(pkgs, input.Symbol, input.File, input.Line)
+	targetObj := FindSymbolObject(pkgs, input.Symbol, input.Package, input.File, input.Line)
 	if targetObj == nil {
 		// Two distinct failure modes deserve distinct nudges. The
 		// no-position case is the common one for agents trying to

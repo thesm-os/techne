@@ -99,7 +99,7 @@ func setupSymbolModule(t *testing.T) []*packages.Package {
 func TestFindSymbolObject(t *testing.T) {
 	t.Run("exported function", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "NewEngine", "", 0)
+		obj := FindSymbolObject(pkgs, "NewEngine", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil object for NewEngine")
 		}
@@ -110,7 +110,7 @@ func TestFindSymbolObject(t *testing.T) {
 
 	t.Run("method on struct", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "Engine.Run", "", 0)
+		obj := FindSymbolObject(pkgs, "Engine.Run", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil object for Engine.Run")
 		}
@@ -121,7 +121,7 @@ func TestFindSymbolObject(t *testing.T) {
 
 	t.Run("interface", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "Storage", "", 0)
+		obj := FindSymbolObject(pkgs, "Storage", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil object for Storage interface")
 		}
@@ -129,7 +129,7 @@ func TestFindSymbolObject(t *testing.T) {
 
 	t.Run("constant", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "MaxRetries", "", 0)
+		obj := FindSymbolObject(pkgs, "MaxRetries", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil object for MaxRetries")
 		}
@@ -140,7 +140,7 @@ func TestFindSymbolObject(t *testing.T) {
 
 	t.Run("variable", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "DefaultName", "", 0)
+		obj := FindSymbolObject(pkgs, "DefaultName", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil object for DefaultName")
 		}
@@ -151,7 +151,7 @@ func TestFindSymbolObject(t *testing.T) {
 
 	t.Run("not found returns nil", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "NonExistent", "", 0)
+		obj := FindSymbolObject(pkgs, "NonExistent", "", "", 0)
 		if obj != nil {
 			t.Errorf("expected nil for unknown symbol, got %T %v", obj, obj)
 		}
@@ -169,7 +169,7 @@ func Alpha() string {
 		pkgs := loadTestPackages(t, dir)
 
 		absFile := filepath.Join(dir, "pkg/core/local.go")
-		obj := FindSymbolObject(pkgs, "result", absFile, 4)
+		obj := FindSymbolObject(pkgs, "result", "", absFile, 4)
 		if obj == nil {
 			t.Fatal("expected non-nil object for local 'result' with file+line hint")
 		}
@@ -191,7 +191,7 @@ func Beta() string {
 		dir := buildTestModule(t, map[string]string{"pkg/core/ambiguous.go": src})
 		pkgs := loadTestPackages(t, dir)
 
-		obj := FindSymbolObject(pkgs, "result", "", 0)
+		obj := FindSymbolObject(pkgs, "result", "", "", 0)
 		if obj != nil {
 			t.Errorf("expected nil for ambiguous 'result' without file+line, got %T %v", obj, obj)
 		}
@@ -214,11 +214,11 @@ func Beta() string {
 		pkgs := loadTestPackages(t, dir)
 		absFile := filepath.Join(dir, "pkg/core/ambiguous2.go")
 
-		objAlpha := FindSymbolObject(pkgs, "result", absFile, 4)
+		objAlpha := FindSymbolObject(pkgs, "result", "", absFile, 4)
 		if objAlpha == nil {
 			t.Fatal("expected non-nil object for Alpha's 'result'")
 		}
-		objBeta := FindSymbolObject(pkgs, "result", absFile, 9)
+		objBeta := FindSymbolObject(pkgs, "result", "", absFile, 9)
 		if objBeta == nil {
 			t.Fatal("expected non-nil object for Beta's 'result'")
 		}
@@ -229,7 +229,7 @@ func Beta() string {
 
 	t.Run("pointer-receiver method found via type name", func(t *testing.T) {
 		pkgs := setupSymbolModule(t)
-		obj := FindSymbolObject(pkgs, "Engine.Run", "", 0)
+		obj := FindSymbolObject(pkgs, "Engine.Run", "", "", 0)
 		if obj == nil {
 			t.Fatal("expected non-nil for pointer-receiver method Engine.Run")
 		}

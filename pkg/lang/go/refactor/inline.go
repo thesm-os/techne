@@ -70,7 +70,7 @@ func (a *InlineAction) Execute(ctx context.Context, input Input, ws Transaction)
 		return fmt.Errorf("load packages: %w", err)
 	}
 
-	targetObj := FindSymbolObject(pkgs, input.Symbol, input.File, input.Line)
+	targetObj := FindSymbolObject(pkgs, input.Symbol, input.Package, input.File, input.Line)
 	if targetObj == nil {
 		return fmt.Errorf("symbol %q not found", input.Symbol)
 	}

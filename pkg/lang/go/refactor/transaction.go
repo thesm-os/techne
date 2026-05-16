@@ -433,8 +433,8 @@ func (ws *WorkspaceTransaction) materializeOverlay() (string, func(), error) {
 		// original path regardless, but a sensible extension keeps
 		// debugging tractable when something goes sideways.
 		tempPath := filepath.Join(overlayDir, fmt.Sprintf("staged-%d.go", i))
-		if err := os.WriteFile(tempPath, content, 0o644); err != nil {
-			return "", cleanup, fmt.Errorf("write staged content for %s: %w", origPath, err)
+		if writeErr := os.WriteFile(tempPath, content, 0o644); writeErr != nil {
+			return "", cleanup, fmt.Errorf("write staged content for %s: %w", origPath, writeErr)
 		}
 		replace[origPath] = tempPath
 	}

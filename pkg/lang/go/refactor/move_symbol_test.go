@@ -275,7 +275,10 @@ func Gamma() int { return 3 }
 			t.Errorf("expected 'cross-package' in error, got: %v", err)
 		}
 		if !strings.Contains(msg, "move_symbol") || !strings.Contains(msg, "move_file") {
-			t.Errorf("multi-symbol file should name both move_symbol and move_file in the two-step pattern; got: %v", err)
+			t.Errorf(
+				"multi-symbol file should name both move_symbol and move_file in the two-step pattern; got: %v",
+				err,
+			)
 		}
 	})
 

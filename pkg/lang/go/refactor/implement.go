@@ -78,7 +78,7 @@ func (*ImplementInterfaceAction) Execute(ctx context.Context, input Input, ws Tr
 	}
 
 	// 1. Locate the struct type object.
-	structObj := FindSymbolObject(pkgs, input.TargetStruct, "", 0)
+	structObj := FindSymbolObject(pkgs, input.TargetStruct, input.Package, "", 0)
 	if structObj == nil {
 		return fmt.Errorf("struct %q not found", input.TargetStruct)
 	}
