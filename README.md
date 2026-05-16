@@ -119,8 +119,8 @@ techne lang go search --query='how is backpressure handled'
 
 | Tool | Purpose |
 |---|---|
-| `rename` | Project-wide symbol rename (type-checked, handles method dispatch) |
-| `change_signature` | Add/remove parameters and returns; rewrites every call site |
+| `rename` | Project-wide symbol rename (type-checked; handles method dispatch, local variables, function/method parameters via file+line) |
+| `change_signature` | Add/remove parameters and returns (`remove_returns` by type); rewrites every call site for param changes |
 | `change_type` | Replace a type definition; updates every usage |
 | `move_symbol` | Move a symbol between files in the same package |
 | `move_symbols` | Atomic batch of moves (single build gate) |
@@ -139,8 +139,9 @@ techne lang go search --query='how is backpressure handled'
 | `verify` | Run lint, test, bench, and fuzz suites with structured output |
 | `search` | Fuzzy + intent-based symbol search (gopls + in-process scorer) |
 | `search_explore` | Search + show source bodies in one round-trip |
-| `explore` | Map a package's API or read specific functions' source |
-| `callers` / `references` / `implementations` / `invocations` | Type-checked relationship queries |
+| `explore` | Map a package's API (`mode=overview` for an at-a-glance outline) or read specific functions' source |
+| `callers` (`kind` = `call` / `value` / `all`) | Direct `f(args)` call sites, value-uses (`cb := f`, `g(f)`), or both — distinct from `references` |
+| `references` / `implementations` / `invocations` | Type-checked relationship queries; workspace-local by default (`include_external=true` adds stdlib + deps) |
 
 #### `fs.*` — Filesystem operations
 
@@ -161,6 +162,7 @@ and **TypeScript** are present and follow the same shape; expand as needed.
 | **Workspace-aware** | `go.work` setups handled transparently |
 | **Atomic** | All-or-nothing; rollback on any post-edit failure |
 | **Build-gated** | `go vet` + `go build` run before any commit |
+| **Honest dry-runs** | `dry_run=true` still runs the build gate against the post-change projection via `go build -overlay`; `build_status:pass` guarantees a real commit will compile |
 | **Structured I/O** | Inputs and outputs are JSON-Schema validated |
 | **Detail-controllable** | `summary` / `standard` / `full` verbosity per call |
 
@@ -203,9 +205,9 @@ and **TypeScript** are present and follow the same shape; expand as needed.
 Detailed architecture notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 The agent-facing routing rules (when to reach for a `lang.go.*` tool versus
-generic Read/Edit/Grep) are documented in [docs/CLAUDE.md](docs/CLAUDE.md) —
-copy that file into your downstream project's `CLAUDE.md` to teach the agent
-to use techne.
+generic Read/Edit/Grep) are documented in [docs/AGENT.md](docs/AGENT.md) —
+copy that file into your downstream project's `CLAUDE.md` / `AGENTS.md` /
+`GEMINI.md` to teach the agent to use techne.
 
 ## Development
 
@@ -223,8 +225,8 @@ make help          # list every target with annotations
 ```
 
 For Go work *inside* this repo, the routing rules in
-[`CLAUDE.md`](CLAUDE.md) describe which `lang.go.*` tool to reach for; the
-project dogfoods its own tools.
+[`docs/AGENT.md`](docs/AGENT.md) describe which `lang.go.*` tool to reach
+for; the project dogfoods its own tools.
 
 ### Project layout
 

@@ -154,7 +154,7 @@ multiple files. The transaction abstraction enforces this:
    the new content parses as Go (`go/parser`) and runs `goimports` in
    memory. Nothing touches disk yet.
 
-2. **Commit phase.** On `tx.Commit()`:
+2. **Commit phase (real).** On `tx.Commit()` with `dryRun=false`:
    1. Stage all deletions (`os.Remove`).
    2. Write all modified files via `fs.AtomicWrite` (temp file + rename).
    3. Snapshot `go.mod` / `go.sum` before any tidy.
@@ -165,10 +165,24 @@ multiple files. The transaction abstraction enforces this:
       return a `Failure` status with the first compiler diagnostic.
    7. **On success:** the workspace is in a verified-buildable state.
 
+3. **Commit phase (dry-run).** On `tx.Commit()` with `dryRun=true`,
+   no bytes touch the workspace. Instead, `commitDryRun` materializes
+   the staged changes into a temp directory and emits a
+   `go build -overlay` manifest mapping each original path either to
+   the temp file with the new content (modifications) or to the empty
+   string (deletions, which the toolchain treats as "absent for this
+   build"). `buildModule` then runs with `-overlay=<manifest>` so the
+   compiler sees the post-change projection and either passes or
+   fails honestly. The returned `BuildStatus` reflects what a real
+   commit would produce — `pass` means applying for real is
+   guaranteed to compile. The temp directory is cleaned up before
+   the function returns.
+
 The Transaction interface is what makes the refactor actions testable
 without a real Go module: a fake `Transaction` implementation captures
 the staged edits and asserts on them, while the real
-`WorkspaceTransaction` runs the build gate end-to-end.
+`WorkspaceTransaction` runs the build gate end-to-end (real or via
+overlay).
 
 ## What is and isn't updated by a refactor
 
@@ -191,7 +205,8 @@ invisible to static analysis):
 
 When a refactor crosses one of these boundaries, the tool surfaces a
 `Note` in the output advising manual grep — see
-`CLAUDE.md`'s "Reflection-based references — manual audit" section.
+[`AGENT.md`](AGENT.md)'s "Reflection caveat" for the agent-side
+follow-up.
 
 ## Output verbosity
 
