@@ -635,6 +635,16 @@ type SearchExploreInput struct {
 	// implementations for direct patching or [ModeDocs] for the cheapest
 	// output.
 	Mode string `json:"mode,omitempty" jsonschema:"Explore mode for the picked result: 'docs', 'skeleton' (default), or 'code'."`
+	// IncludeTests adds matches in `*_test` and `*.test` packages to the
+	// ranked Results. Default false — these external test packages
+	// cannot be loaded by `packages.Load`/`go list` (the Go toolchain
+	// only addresses them via `go test`), so picking one would fail the
+	// internal explore step. Default-false avoids that crash and
+	// matches the common search intent: "find the production symbol",
+	// not its test. Set true when explicitly hunting for a test
+	// function by name; the tool will still skip past test results that
+	// fail to explore and try the next non-test rank as a safety net.
+	IncludeTests bool `json:"include_tests,omitempty" jsonschema:"Include matches in *_test / *.test packages. Default: false — external test packages cannot be loaded by the Go toolchain, so picking one would crash the explore step. Set true to surface tests when searching for a Test*/Benchmark*/Fuzz* function by name."`
 }
 
 // SearchExploreOutput is the fused response from
