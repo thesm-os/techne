@@ -381,6 +381,119 @@ var _ root.Plugin = (*%s)(nil)
 		}
 	})
 
+	// Regression for the eidos report: when multiple packages declare a
+	// same-named function (`New`, `Default`, `Load` — exactly the names
+	// most refactors touch), Callers used to ignore the supplied Package
+	// arg and surface every `New(...)` call in the workspace. Same bug
+	// class as the pre-fix inline_constant case but at the deps-tools
+	// layer.
+	//
+	// Uses a go.work multi-module setup because runDepsQuery's existing
+	// behaviour re-loads every workspace module when Package is set in
+	// go.work mode (otherwise cross-module callers would be missed). The
+	// re-load is what brings sibling-package callers into the candidate
+	// set, which is exactly where the name-only matcher leaks.
+	t.Run("Callers/PackageDisambiguatesSameNamedSymbols", func(t *testing.T) {
+		root := t.TempDir()
+		// Each "module" sits under its own go.mod, mirroring eidos's
+		// reference/{repogen,auditweaver} shape.
+		mustWriteFileT(t, filepath.Join(root, "repogen", "go.mod"), "module ex/repogen\n\ngo 1.21\n")
+		mustWriteFileT(t, filepath.Join(root, "repogen", "repogen.go"), `package repogen
+
+type Plugin struct{}
+
+func New() *Plugin { return &Plugin{} }
+
+func InternalRepogenCaller() *Plugin { return New() }
+`)
+		mustWriteFileT(t, filepath.Join(root, "auditweaver", "go.mod"), "module ex/auditweaver\n\ngo 1.21\n")
+		mustWriteFileT(t, filepath.Join(root, "auditweaver", "auditweaver.go"), `package auditweaver
+
+type Weaver struct{}
+
+func New() *Weaver { return &Weaver{} }
+
+func InternalAuditweaverCaller() *Weaver { return New() }
+`)
+		mustWriteFileT(t, filepath.Join(root, "go.work"),
+			"go 1.21\n\nuse (\n\t./repogen\n\t./auditweaver\n)\n")
+		t.Chdir(root)
+
+		out := executeDeps(t, golang.Callers, lang.CallersInput{
+			Symbol:  "New",
+			Package: "ex/repogen",
+		})
+
+		// Every result must belong to repogen — the user passed that
+		// package as the disambiguator. Callers of auditweaver.New
+		// must NOT surface.
+		if len(out.Results) == 0 {
+			t.Fatal("expected callers of repogen.New; got 0")
+		}
+		for _, r := range out.Results {
+			if !strings.Contains(r.Package, "repogen") {
+				t.Errorf("Package=repogen must scope results; got %q at %s", r.Package, r.Location)
+			}
+			if r.CallerSymbol == "InternalAuditweaverCaller" {
+				t.Errorf("Package=repogen leaked an auditweaver caller: %+v", r)
+			}
+		}
+	})
+
+	// Regression for the eidos report: when an interface lives in the
+	// root module of a go.work tree and implementors live in sibling
+	// modules that import the root, implementationsHandler used to
+	// return only the root module's own packages (same-module test
+	// stubs) and miss every sibling. The original
+	// WorksAcrossGoWorkModules test passed because it called with no
+	// Package arg, which fell back to a `./...` load covering every
+	// module. With Package="<interface-pkg>" set the load narrowed to
+	// just that package — and flattenWithDeps walks DOWN through
+	// imports, not UP through importers, so sibling modules never
+	// entered allPkgs.
+	t.Run("Implementations/PackageSetSpansGoWorkSiblings", func(t *testing.T) {
+		root := t.TempDir()
+
+		// Root module: declares the interface in subpackage "plugin".
+		mustWriteFileT(t, filepath.Join(root, "go.mod"), "module example.com/eidos\n\ngo 1.21\n")
+		mustWriteFileT(t, filepath.Join(root, "plugin", "plugin.go"), `package plugin
+
+type Plugin interface { Name() string }
+`)
+		// Sibling module: imports the root and implements Plugin.
+		mustWriteFileT(t, filepath.Join(root, "reference", "go.mod"),
+			"module example.com/eidos/reference\n\n"+
+				"go 1.21\n\n"+
+				"require example.com/eidos v0.0.0\n\n"+
+				"replace example.com/eidos => ..\n")
+		mustWriteFileT(t, filepath.Join(root, "reference", "repogen", "repogen.go"), `package repogen
+
+import "example.com/eidos/plugin"
+
+type RepoGen struct{}
+func (r *RepoGen) Name() string { return "repogen" }
+
+// Compile-time guard locks in the relationship.
+var _ plugin.Plugin = (*RepoGen)(nil)
+`)
+		mustWriteFileT(t, filepath.Join(root, "go.work"),
+			"go 1.21\n\nuse (\n\t./\n\t./reference\n)\n")
+		t.Chdir(root)
+
+		out := executeDeps(t, golang.Implementations, lang.ImplementationsInput{
+			Symbol:  "Plugin",
+			Package: "example.com/eidos/plugin",
+		})
+
+		if !containsSymbolDep(out.Results, "RepoGen") {
+			t.Errorf(
+				"Package=plugin in a go.work tree must find sibling-module implementors; "+
+					"got %v",
+				symbolList(out.Results),
+			)
+		}
+	})
+
 	t.Run("WorksAcrossGoWorkModules", func(t *testing.T) {
 		root := t.TempDir()
 

@@ -17,6 +17,7 @@ import (
 	"go.thesmos.sh/techne/internal/tool"
 	"go.thesmos.sh/techne/pkg/lang"
 	"go.thesmos.sh/techne/pkg/lang/go/internal/workspace"
+	"go.thesmos.sh/techne/pkg/lang/go/refactor"
 )
 
 // Four narrow dependency-tracing tools that replaced the old union-shaped
@@ -81,9 +82,25 @@ var Callers = tool.New[lang.CallersInput, lang.DepsResult](
 				if kind == "" {
 					kind = lang.CallersKindCall
 				}
+				// When Package is set, resolve the symbol to a specific
+				// types.Object so call-site matching can compare by
+				// identity instead of name. Falls back to name-only
+				// when Package is empty or the symbol can't be pinned
+				// to a unique declaration. Reuses the refactor-side
+				// resolver so the package-filter behaviour (import-
+				// path exact, dir-prefix, wildcard) is identical to
+				// rename/change_signature/inline_constant.
+				var targetObj types.Object
+				if in.Package != "" {
+					pkgSlice := make([]*packages.Package, 0, len(allPkgs))
+					for _, p := range allPkgs {
+						pkgSlice = append(pkgSlice, p)
+					}
+					targetObj = refactor.FindSymbolObject(pkgSlice, in.Symbol, in.Package, "", 0)
+				}
 				var refs []lang.DepReference
 				if kind == lang.CallersKindCall || kind == lang.CallersKindAll {
-					refs = append(refs, findCallers(in.Symbol, allPkgs)...)
+					refs = append(refs, findCallers(in.Symbol, allPkgs, targetObj)...)
 				}
 				if kind == lang.CallersKindValue || kind == lang.CallersKindAll {
 					refs = append(refs, findValueUses(in.Symbol, allPkgs)...)
@@ -152,6 +169,20 @@ func implementationsHandler(ctx context.Context, in lang.ImplementationsInput) (
 	pkgs, err := ws.Load(ctx, depsLoadMode, patterns, workspace.WithFset(fset), workspace.WithTests())
 	if err != nil {
 		return out, fmt.Errorf("load packages: %w", err)
+	}
+	// In a go.work tree, an interface declared in module A is typically
+	// implemented in sibling modules B, C, … that *import* A. Sibling
+	// modules don't appear in flattenWithDeps starting from A alone
+	// (flattenWithDeps walks A's imports — downward — not its
+	// importers). Load the workspace defaults additionally so every
+	// module's packages enter allPkgs; the localRoots filter then keeps
+	// the result workspace-bounded. Mirrors the same fix runDepsQuery
+	// applies for callers/references/invocations.
+	if in.Package != "" && ws.IsGoWork() {
+		extra, err := ws.Load(ctx, depsLoadMode, nil, workspace.WithFset(fset), workspace.WithTests())
+		if err == nil {
+			pkgs = append(pkgs, extra...)
+		}
 	}
 
 	allPkgs := flattenWithDeps(pkgs)
@@ -587,12 +618,21 @@ func findImplementations(
 // is calling), the caller's docblock when present, and a one-line
 // textual context derived from extractCallContext.
 //
-// Matching is name-based on the resolved callee identifier or selector
-// (extractCallName). This is intentionally conservative — same-named
-// identifiers in unrelated scopes will all match, but the cost of
-// false positives here is small because the caller's location and
-// symbol typically make the disambiguation obvious to the agent.
-func findCallers(symbol string, allPkgs map[string]*packages.Package) []lang.DepReference {
+// Matching modes:
+//
+//   - When targetObj is non-nil, matching is by [types.Object] identity:
+//     the callee's TypesInfo.Uses entry must equal targetObj. This is the
+//     "Package was specified" path — the caller has already resolved the
+//     target via [FindSymbolObject] to a specific package's declaration,
+//     and we want callers of THAT declaration only, not every same-named
+//     symbol in the workspace.
+//   - When targetObj is nil, matching falls back to name-based on the
+//     resolved callee identifier or selector (extractCallName). Used when
+//     Package is empty or the resolver couldn't pin a unique object — the
+//     name-only path is intentionally conservative (same-named identifiers
+//     in unrelated scopes all match), but the caller's location and the
+//     reported symbol usually make the disambiguation obvious downstream.
+func findCallers(symbol string, allPkgs map[string]*packages.Package, targetObj types.Object) []lang.DepReference {
 	var refs []lang.DepReference
 
 	for _, p := range allPkgs {
@@ -613,9 +653,18 @@ func findCallers(symbol string, allPkgs map[string]*packages.Package) []lang.Dep
 					return true
 				}
 
-				// Extract the called name.
-				calledName := extractCallName(call.Fun)
-				if calledName != symbol {
+				// Object-identity matching when the caller resolved a
+				// specific target via Package. Fall back to name-only
+				// matching when no targetObj is supplied.
+				if targetObj != nil {
+					if p.TypesInfo == nil {
+						return true
+					}
+					calleeIdent := calleeIdentOf(call.Fun)
+					if calleeIdent == nil || p.TypesInfo.Uses[calleeIdent] != targetObj {
+						return true
+					}
+				} else if extractCallName(call.Fun) != symbol {
 					return true
 				}
 
@@ -643,6 +692,21 @@ func findCallers(symbol string, allPkgs map[string]*packages.Package) []lang.Dep
 	}
 
 	return refs
+}
+
+// calleeIdentOf returns the identifier ast node naming the callee in a
+// CallExpr's Fun position, or nil when the callee is not a plain name
+// or selector. Used by findCallers' object-identity matching path to
+// look up TypesInfo.Uses[ident] without manually unwrapping each AST
+// shape at every call site.
+func calleeIdentOf(fun ast.Expr) *ast.Ident {
+	switch f := fun.(type) {
+	case *ast.Ident:
+		return f
+	case *ast.SelectorExpr:
+		return f.Sel
+	}
+	return nil
 }
 
 // findValueUses walks every loaded AST and records each ast.Ident
