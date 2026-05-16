@@ -5,6 +5,7 @@ package golang_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,70 @@ func TestDeps(t *testing.T) {
 	})
 
 	// ---- workspace ----
+
+	// Regression for B5: in a go.work tree with one root module that
+	// defines an interface and N sibling modules that implement it,
+	// implementations (IncludeExternal=false, the default) used to
+	// return only same-module implementors and miss every sibling.
+	// The fix routed through workspaceLocalRoots(ws), which captures
+	// every workspace module's import-path root — so siblings now
+	// count as workspace-local. This mirrors the user's eidos shape
+	// (root `plugin.Plugin` interface, implementors in
+	// reference/shapewriter, backend/golang, frontend/golang, etc.).
+	t.Run("WorksAcrossGoWorkModules/multipleSiblings", func(t *testing.T) {
+		root := t.TempDir()
+
+		// Root module defines the interface.
+		mustWriteFileT(t, filepath.Join(root, "modRoot", "go.mod"), "module example.com/root\n\ngo 1.21\n")
+		mustWriteFileT(t, filepath.Join(root, "modRoot", "plugin.go"), `package root
+
+// Plugin is the interface every sibling implements.
+type Plugin interface { Name() string }
+`)
+
+		// Three sibling modules each implement Plugin.
+		for _, sib := range []struct {
+			mod, typ string
+		}{
+			{mod: "shapewriter", typ: "ShapeWriter"},
+			{mod: "repogen", typ: "RepoGen"},
+			{mod: "backend", typ: "BackendImpl"},
+		} {
+			mustWriteFileT(
+				t,
+				filepath.Join(root, sib.mod, "go.mod"),
+				fmt.Sprintf(
+					"module example.com/%s\n\ngo 1.21\n\nrequire example.com/root v0.0.0\n\nreplace example.com/root => ../modRoot\n",
+					sib.mod,
+				),
+			)
+			mustWriteFileT(t, filepath.Join(root, sib.mod, "impl.go"), fmt.Sprintf(`package %s
+
+import "example.com/root"
+
+type %s struct{}
+func (i *%s) Name() string { return %q }
+
+// Compile-time guard locks in the implementation relationship.
+var _ root.Plugin = (*%s)(nil)
+`, sib.mod, sib.typ, sib.typ, sib.typ, sib.typ))
+		}
+
+		mustWriteFileT(t, filepath.Join(root, "go.work"),
+			"go 1.21\n\nuse (\n\t./modRoot\n\t./shapewriter\n\t./repogen\n\t./backend\n)\n")
+		t.Chdir(root)
+
+		// Default scope (IncludeExternal=false): every sibling
+		// implementation must surface.
+		out := executeDeps(t, golang.Implementations, lang.ImplementationsInput{Symbol: "Plugin"})
+
+		got := symbolList(out.Results)
+		for _, want := range []string{"ShapeWriter", "RepoGen", "BackendImpl"} {
+			if !containsSymbolDep(out.Results, want) {
+				t.Errorf("default scope should find %s in sibling workspace module; got %v", want, got)
+			}
+		}
+	})
 
 	t.Run("WorksAcrossGoWorkModules", func(t *testing.T) {
 		root := t.TempDir()

@@ -86,12 +86,16 @@ type ImplementationsInput struct {
 	// implementations are searched across the whole workspace regardless.
 	Package string `json:"package,omitempty" jsonschema:"Package containing the interface. Defaults to the current directory."`
 	// IncludeExternal expands the implementation search beyond the
-	// workspace into external Go modules and the standard library. Default
-	// false, which restricts hits to the project's own packages — the
-	// common case when refactoring local code. Enable when investigating
-	// how a stdlib interface like `io.Reader` is implemented or when
-	// tracing an external interface a third-party library exports.
-	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include implementors from external packages and the standard library. Default: false (project-local only)."`
+	// workspace into external Go modules and the standard library.
+	// Default false — "workspace" here means every module listed in
+	// go.work (or the single module in a non-workspace repo), so
+	// implementations in sibling modules of a multi-module project ARE
+	// included by default. "External" specifically means transitive
+	// dependencies pulled in via go.mod require directives and the
+	// stdlib. Enable when investigating how a stdlib interface like
+	// `io.Reader` is implemented or when tracing an external interface
+	// a third-party library exports.
+	IncludeExternal bool `json:"include_external,omitempty" jsonschema:"Include implementors from external packages (transitive go.mod dependencies) and the standard library. Default: false. Sibling workspace modules in a go.work tree count as workspace-local and are ALWAYS included regardless of this flag — only true deps and stdlib are gated by it."`
 	// Limit caps the number of implementations returned. Defaults to 50
 	// when zero. Widely-implemented interfaces (e.g. `io.Reader` with
 	// IncludeExternal=true) can produce thousands of hits; the cap exists
