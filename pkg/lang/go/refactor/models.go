@@ -115,7 +115,7 @@ type Input struct {
 	Symbol string `json:"symbol,omitempty" jsonschema:"Target symbol to act on. Example: 'NewUser', 'Engine.Run', or 'MaxRetries'. AGENT HINT: Use symbol names from lang.go.search or lang.go.explore results."`
 	// DryRun reports the diff the refactor would produce without writing anything
 	// to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. Use to validate a complex refactor before committing. The output shows what WOULD change — no files are modified."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. Use to validate a complex refactor before committing. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// Detail controls output verbosity: "summary", "standard" (default), or
 	// "full".
 	Detail string `json:"detail,omitempty" jsonschema:"Output verbosity. 'summary': counts and file paths only. 'standard' (default): per-file diff snippets. 'full': adds extra diagnostic context. On failure, only failed entries are returned regardless of mode."`

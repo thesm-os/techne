@@ -119,9 +119,11 @@ type RenameInput struct {
 	Line int `json:"line,omitempty" jsonschema:"1-based line number of the defining identifier (var/:= line, FuncDecl signature line for a parameter, etc.). REQUIRED for local var / parameter renames; ignored for top-level symbols."`
 	// DryRun computes the full rename and returns the would-be diff
 	// without writing to disk. Useful for previewing impact on a
-	// wide-blast-radius identifier before committing. The build gate does
-	// not run in dry-run mode — the result reports textual changes only.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	// wide-blast-radius identifier before committing. The build gate
+	// still runs in dry-run mode, using `go build -overlay` against the
+	// staged change projection — so the response's BuildStatus reflects
+	// what a real Commit would produce.
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the rename
 	// is applied. Diagnostic only — failures are reported but the rename
 	// is NOT rolled back, because by then the workspace is already
@@ -188,9 +190,11 @@ type ChangeSignatureInput struct {
 	// regardless.
 	Package string `json:"package,omitempty" jsonschema:"Target package. Defaults to the current directory."`
 	// DryRun computes the full rewrite and returns the would-be diff
-	// without writing to disk. The build gate does not run in dry-run mode
-	// — the response reports textual changes only.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	// without writing to disk. The build gate still runs in dry-run mode,
+	// using `go build -overlay` against the staged change projection — so
+	// the response's BuildStatus reflects what a real Commit would
+	// produce.
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the change.
 	// Diagnostic only — failures are reported but the change is NOT
 	// rolled back.
@@ -242,8 +246,10 @@ type ImplementInterfaceInput struct {
 	// current working directory.
 	Package string `json:"package,omitempty" jsonschema:"Package containing the target struct. Defaults to the current directory."`
 	// DryRun computes the would-be stubs and returns them without writing
-	// to disk. The build gate does not run in dry-run mode.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	// to disk. The build gate still runs in dry-run mode, using
+	// `go build -overlay` against the staged change projection — so the
+	// response's BuildStatus reflects what a real Commit would produce.
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the stubs
 	// are written. Diagnostic only — failures are reported but the stubs
 	// are NOT removed.
@@ -311,7 +317,7 @@ type ExtractFunctionInput struct {
 	Package string `json:"package,omitempty" jsonschema:"Target package. Defaults to the current directory."`
 	// DryRun computes the would-be extraction and returns it without
 	// writing to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the
 	// extraction. Diagnostic only — failures are reported but the
 	// refactor is NOT rolled back.
@@ -361,7 +367,7 @@ type ExtractInterfaceInput struct {
 	Package string `json:"package,omitempty" jsonschema:"Package containing the struct. Defaults to the current directory."`
 	// DryRun computes the would-be interface declaration and returns it
 	// without writing to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after generation.
 	// Diagnostic only — failures are reported but the new declaration is
 	// NOT removed.
@@ -419,7 +425,7 @@ type ExtractVariableInput struct {
 	Package string `json:"package,omitempty" jsonschema:"Target package. Defaults to the current directory."`
 	// DryRun computes the would-be edits and returns them without
 	// writing to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after extraction.
 	// Diagnostic only — failures are reported but the refactor is NOT
 	// rolled back.
@@ -460,7 +466,7 @@ type InlineConstantInput struct {
 	Package string `json:"package,omitempty" jsonschema:"Package containing the constant. Defaults to the current directory."`
 	// DryRun computes the would-be inlinings and returns them without
 	// writing to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after inlining.
 	// Diagnostic only — failures are reported but the refactor is NOT
 	// rolled back.
@@ -502,7 +508,7 @@ type MovePackageInput struct {
 	DestPackage string `json:"dest_package" jsonschema:"Destination import path. Example: 'internal/new'."`
 	// DryRun computes the would-be moves and importer rewrites and
 	// returns them without touching disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the move.
 	// Diagnostic only — failures are reported but the move is NOT
 	// reverted.
@@ -640,7 +646,7 @@ type DocumentInput struct {
 	// DryRun computes the would-be edits (and validates them) but does
 	// not write to disk. The response carries the diff snippets the agent
 	// can review before applying.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview edits without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview edits without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the
 	// rewrite. Diagnostic only — doc comments do not affect compilation,
 	// but a stale godoc tool may still surface warnings.
@@ -680,7 +686,7 @@ type MoveFileInput struct {
 	TargetFile string `json:"target_file" jsonschema:"Destination .go file path. Example: 'pkg/strings/strings.go'. Must not already exist; the parent directory may exist with compatible package files."`
 	// DryRun computes the would-be move and importer rewrites without
 	// touching disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the move.
 	// Diagnostic only — failures are reported but the move is NOT
 	// reverted.
@@ -724,7 +730,7 @@ type MoveSymbolInput struct {
 	// directory.
 	Package string `json:"package,omitempty" jsonschema:"Source package. Defaults to the current directory."`
 	// DryRun computes the would-be move without touching disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the move.
 	// Diagnostic only — failures are reported but the move is NOT
 	// reverted.
@@ -788,7 +794,7 @@ type DeleteFileInput struct {
 	// DryRun computes whether the deletion would succeed (build still
 	// passes) and returns the result without actually removing the
 	// file.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the
 	// deletion. Diagnostic only — failures are reported but the file is
 	// NOT restored.
@@ -833,7 +839,7 @@ type MoveSymbolsInput struct {
 	// this package.
 	Package string `json:"package,omitempty" jsonschema:"Source package. Defaults to the current directory."`
 	// DryRun computes the would-be rearrangement without touching disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the
 	// rearrangement. Diagnostic only — failures are reported but the
 	// moves are NOT reverted.
@@ -906,7 +912,7 @@ type AddTestsInput struct {
 	Package string `json:"package,omitempty" jsonschema:"Workspace anchor. Defaults to the current directory."`
 	// DryRun computes the would-be generated text and returns it without
 	// writing to disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after generation.
 	// Diagnostic only — failures are reported but the new functions are
 	// NOT removed.
@@ -955,7 +961,7 @@ type ChangeTypeInput struct {
 	// workspace regardless.
 	Package string `json:"package,omitempty" jsonschema:"Package containing the type. Defaults to the current directory."`
 	// DryRun computes the would-be rewrites without touching disk.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview changes without writing to disk. The build gate runs against the post-change projection via 'go build -overlay', so build_status:pass means applying for real is guaranteed to compile."`
 	// AutoVerify triggers a follow-up verification run after the change.
 	// Diagnostic only — failures are reported but the change is NOT
 	// rolled back.

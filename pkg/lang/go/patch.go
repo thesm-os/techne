@@ -71,7 +71,7 @@ type GoPatchInput struct {
 	// DryRun previews the edits by formatting and verifying them in a temp
 	// file without writing to the target on disk. Returns the would-be
 	// DiffReceipt so the agent can preview what would change.
-	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview edits without writing to disk."`
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"Preview edits without writing to disk. The build gate runs against a temp-file swap of the post-change content (atomically restored on exit), so build_status:pass means applying for real is guaranteed to compile."`
 	// Force bypasses the pre-patch build gate, which is intended for
 	// recovering from a broken workspace after a failed refactor. The
 	// post-patch build gate still applies, so a Force=true patch that
