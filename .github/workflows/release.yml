@@ -57,7 +57,7 @@ jobs:
       # `slsa-verifier verify-artifact` against the downloaded
       # attestation bundle.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           # Attest both the archives AND the raw per-target binaries
           # under dist/<id>_<goos>_<goarch>[_<variant>]/. Including the
